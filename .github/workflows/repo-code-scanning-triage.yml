@@ -1,0 +1,254 @@
+name: Repo Code Scanning Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        default: boardguard
+        type: string
+      tool_name:
+        description: Optional tool filter, e.g. Scorecard or CodeQL
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-code-scanning-triage-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Build code scanning triage report
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TOOL_NAME: ${{ inputs.tool_name }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          mkdir -p "${RAW}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          api --method GET "repos/${REPO}" > "${RAW}/repo.json"
+          DEFAULT_BRANCH="$(jq -r '.default_branch // "main"' "${RAW}/repo.json")"
+
+          if [[ -n "${TOOL_NAME}" ]]; then
+            api --method GET "repos/${REPO}/code-scanning/alerts" \
+              -F state=open \
+              -F "ref=refs/heads/${DEFAULT_BRANCH}" \
+              -F tool_name="${TOOL_NAME}" \
+              -F per_page=100 \
+              > "${RAW}/open-alerts.json"
+          else
+            api --method GET "repos/${REPO}/code-scanning/alerts" \
+              -F state=open \
+              -F "ref=refs/heads/${DEFAULT_BRANCH}" \
+              -F per_page=100 \
+              > "${RAW}/open-alerts.json"
+          fi
+
+          if [[ -n "${TOOL_NAME}" ]]; then
+            api --method GET "repos/${REPO}/code-scanning/analyses" \
+              -F "ref=refs/heads/${DEFAULT_BRANCH}" \
+              -F tool_name="${TOOL_NAME}" \
+              -F per_page=30 \
+              > "${RAW}/analyses.json" || echo "[]" > "${RAW}/analyses.json"
+          else
+            api --method GET "repos/${REPO}/code-scanning/analyses" \
+              -F "ref=refs/heads/${DEFAULT_BRANCH}" \
+              -F per_page=30 \
+              > "${RAW}/analyses.json" || echo "[]" > "${RAW}/analyses.json"
+          fi
+
+          jq -n \
+            --arg target "${REPO}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg tool_filter "${TOOL_NAME}" \
+            --slurpfile alerts "${RAW}/open-alerts.json" \
+            --slurpfile analyses "${RAW}/analyses.json" \
+            '
+            def text_or_empty(x): if x == null then "" else x end;
+
+            def classify($rule_name; $path; $message):
+              ($rule_name + " " + $path + " " + $message) as $s
+              | if ($s | test("Pinned-Dependencies|Token-Permissions|Security-Policy"; "i")) then
+                  "actionable_patch"
+                elif ($s | test("Branch-Protection"; "i")) then
+                  "ruleset_or_review_model"
+                elif ($s | test("Fuzzing|CII-Best-Practices|Maintained|Code-Review|CI-Tests|SAST"; "i")) then
+                  "process_policy_deferred"
+                else
+                  "manual_review"
+                end;
+
+            def recommendation($classification; $rule_name):
+              if $classification == "actionable_patch" then
+                "Patch workflow/repository files through PR, run diagnostics, then re-run Scorecard."
+              elif $classification == "ruleset_or_review_model" then
+                "Keep operational ruleset unless a second reviewer/bot approval identity exists; strict-scorecard profile may improve score but can block solo agent merge."
+              elif $classification == "process_policy_deferred" then
+                "Do not patch blindly. Track as process/policy work: coverage history, project metadata, fuzzing setup, CII badge, maintainer activity, or review model."
+              else
+                "Inspect alert instance manually before patching or dismissing."
+              end;
+
+            {
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              tool_filter: (if $tool_filter == "" then null else $tool_filter end),
+              analyses: ($analyses[0] | map({
+                id,
+                created_at,
+                ref,
+                commit_sha,
+                analysis_key,
+                category,
+                tool_name: .tool.name,
+                results_count
+              })),
+              alerts: (
+                $alerts[0] | map(
+                  {
+                    number,
+                    state,
+                    created_at,
+                    updated_at,
+                    html_url,
+                    rule: {
+                      id: .rule.id,
+                      name: .rule.name,
+                      severity: .rule.severity,
+                      security_severity_level: .rule.security_severity_level
+                    },
+                    tool: {
+                      name: .tool.name,
+                      version: .tool.version
+                    },
+                    instance: {
+                      analysis_key: .most_recent_instance.analysis_key,
+                      category: .most_recent_instance.category,
+                      path: .most_recent_instance.location.path,
+                      start_line: .most_recent_instance.location.start_line,
+                      end_line: .most_recent_instance.location.end_line,
+                      message: .most_recent_instance.message.text
+                    }
+                  }
+                  | .classification = classify(
+                      text_or_empty(.rule.name);
+                      text_or_empty(.instance.path);
+                      text_or_empty(.instance.message)
+                    )
+                  | .recommended_action = recommendation(.classification; text_or_empty(.rule.name))
+                )
+              )
+            }
+            | .summary = {
+                total_open_alerts: (.alerts | length),
+                by_tool: (
+                  .alerts
+                  | group_by(.tool.name)
+                  | map({tool: .[0].tool.name, count: length})
+                ),
+                by_rule: (
+                  .alerts
+                  | group_by(.rule.name)
+                  | map({rule: .[0].rule.name, count: length})
+                ),
+                by_classification: (
+                  .alerts
+                  | group_by(.classification)
+                  | map({classification: .[0].classification, count: length})
+                ),
+                actionable_patch_count: (.alerts | map(select(.classification == "actionable_patch")) | length),
+                process_policy_deferred_count: (.alerts | map(select(.classification == "process_policy_deferred")) | length),
+                ruleset_or_review_model_count: (.alerts | map(select(.classification == "ruleset_or_review_model")) | length),
+                manual_review_count: (.alerts | map(select(.classification == "manual_review")) | length)
+              }
+            ' > "${OUT}/code-scanning-triage.json"
+
+          jq -r '
+            "# Code Scanning Triage\n\n" +
+            "Repository: " + .target + "\n" +
+            "Default branch: " + .default_branch + "\n" +
+            "Open alerts: " + (.summary.total_open_alerts | tostring) + "\n\n" +
+            "## Classification\n\n" +
+            (
+              .summary.by_classification
+              | map("- " + .classification + ": " + (.count | tostring))
+              | join("\n")
+            ) +
+            "\n\n## Alerts\n\n" +
+            (
+              .alerts
+              | map(
+                  "- #" + (.number | tostring) +
+                  " `" + (.rule.name // "unknown") + "`" +
+                  " [" + .classification + "] " +
+                  (.instance.path // "unknown") +
+                  ":" + ((.instance.start_line // 0) | tostring) +
+                  " — " + (.recommended_action // "")
+                )
+              | join("\n")
+            )
+          ' "${OUT}/code-scanning-triage.json" > "${OUT}/code-scanning-triage.md"
+
+          {
+            echo "### Code Scanning Triage"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Default branch | ${DEFAULT_BRANCH} |"
+            echo "| Open alerts | $(jq -r '.summary.total_open_alerts' "${OUT}/code-scanning-triage.json") |"
+            echo "| Actionable patch | $(jq -r '.summary.actionable_patch_count' "${OUT}/code-scanning-triage.json") |"
+            echo "| Ruleset/review model | $(jq -r '.summary.ruleset_or_review_model_count' "${OUT}/code-scanning-triage.json") |"
+            echo "| Process/policy deferred | $(jq -r '.summary.process_policy_deferred_count' "${OUT}/code-scanning-triage.json") |"
+            echo "| Manual review | $(jq -r '.summary.manual_review_count' "${OUT}/code-scanning-triage.json") |"
+            echo ""
+            echo "#### Alerts"
+            jq -r '.alerts[] | "- #\(.number) `\(.rule.name)` [\(.classification)] \(.instance.path // "unknown"):\(.instance.start_line // 0)"' "${OUT}/code-scanning-triage.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload code scanning triage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: code-scanning-triage-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14
