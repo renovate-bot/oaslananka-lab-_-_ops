@@ -94,16 +94,28 @@ jobs:
             --json name,workflow,state,bucket,link,startedAt,completedAt \
             > "${OUT}/pr-checks.json" 2> "${OUT}/pr-checks.err" || true
 
-          gh run list \
-            --repo "${REPO}" \
-            --branch "${HEAD_REF}" \
-            --limit 30 \
-            --json databaseId,name,status,conclusion,workflowName,createdAt,updatedAt,url,headSha,event \
-            > "${OUT}/runs.json"
+          api --method GET "repos/${REPO}/actions/runs" \
+            -F head_sha="${HEAD_SHA}" \
+            -F per_page=100 \
+            > "${OUT}/runs-api.json"
 
-          jq --arg head_sha "${HEAD_SHA}" '
-            map(select(.headSha == $head_sha))
-          ' "${OUT}/runs.json" > "${OUT}/runs-current-head.json"
+          jq '
+            .workflow_runs
+            | map({
+                databaseId: .id,
+                name: .name,
+                status: .status,
+                conclusion: .conclusion,
+                workflowName: .name,
+                createdAt: .created_at,
+                updatedAt: .updated_at,
+                url: .html_url,
+                headSha: .head_sha,
+                event: .event
+              })
+          ' "${OUT}/runs-api.json" > "${OUT}/runs-current-head.json"
+
+          cp "${OUT}/runs-current-head.json" "${OUT}/runs.json"
 
           jq -r '.[] | select(.status == "completed" and .conclusion == "failure") | .databaseId' "${OUT}/runs-current-head.json" \
             > "${OUT}/failed-run-ids.txt"
@@ -221,6 +233,7 @@ jobs:
           name: agent-pr-diagnostics-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
           path: out/
           retention-days: 14
+
 
 
 
