@@ -101,7 +101,11 @@ jobs:
             --json databaseId,name,status,conclusion,workflowName,createdAt,updatedAt,url,headSha,event \
             > "${OUT}/runs.json"
 
-          jq -r '.[] | select(.status == "completed" and .conclusion == "failure") | .databaseId' "${OUT}/runs.json" \
+          jq --arg head_sha "${HEAD_SHA}" '
+            map(select(.headSha == $head_sha))
+          ' "${OUT}/runs.json" > "${OUT}/runs-current-head.json"
+
+          jq -r '.[] | select(.status == "completed" and .conclusion == "failure") | .databaseId' "${OUT}/runs-current-head.json" \
             > "${OUT}/failed-run-ids.txt"
 
           while IFS= read -r run_id; do
@@ -137,7 +141,8 @@ jobs:
           jq -n \
             --slurpfile pr "${OUT}/pr.json" \
             --slurpfile checks "${OUT}/pr-checks.json" \
-            --slurpfile runs "${OUT}/runs.json" \
+            --slurpfile runs "${OUT}/runs-current-head.json" \
+            --slurpfile all_runs "${OUT}/runs.json" \
             --slurpfile threads "${OUT}/unresolved-review-threads.json" \
             '{
               pr: $pr[0],
@@ -149,10 +154,18 @@ jobs:
                 skipped: ($checks[0] | map(select(.bucket == "skipping")) | length)
               },
               run_summary: {
+                scope: "current_pr_head_sha",
                 total: ($runs[0] | length),
                 failures: ($runs[0] | map(select(.conclusion == "failure")) | length),
                 successes: ($runs[0] | map(select(.conclusion == "success")) | length),
                 skipped: ($runs[0] | map(select(.conclusion == "skipped")) | length)
+              },
+              all_run_summary: {
+                scope: "branch_history",
+                total: ($all_runs[0] | length),
+                failures: ($all_runs[0] | map(select(.conclusion == "failure")) | length),
+                successes: ($all_runs[0] | map(select(.conclusion == "success")) | length),
+                skipped: ($all_runs[0] | map(select(.conclusion == "skipped")) | length)
               },
               unresolved_review_threads: $threads[0]
             }' > "${OUT}/diagnostics.json"
@@ -195,7 +208,7 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Failed runs" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.[] | select(.conclusion == "failure") | "- `" + (.databaseId|tostring) + "` " + .workflowName + " / " + .name + " — " + .url' "${OUT}/runs.json" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | select(.conclusion == "failure") | "- `" + (.databaseId|tostring) + "` " + .workflowName + " / " + .name + " — " + .url' "${OUT}/runs-current-head.json" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Unresolved review threads" >> "$GITHUB_STEP_SUMMARY"
@@ -208,5 +221,6 @@ jobs:
           name: agent-pr-diagnostics-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
           path: out/
           retention-days: 14
+
 
 
