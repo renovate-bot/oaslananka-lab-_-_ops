@@ -1,0 +1,300 @@
+name: Repo Onboarding
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        type: string
+      desired_ruleset_profile:
+        description: Expected ruleset profile
+        required: true
+        default: operational
+        type: choice
+        options:
+          - operational
+          - strict-scorecard
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-onboarding-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  onboard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Build onboarding report
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          DESIRED_RULESET_PROFILE: ${{ inputs.desired_ruleset_profile }}
+          API_VERSION: "2026-03-10"
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app.outputs.installation-id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          mkdir -p "${RAW}"
+
+          api_capture() {
+            local name="$1"
+            local method="$2"
+            local endpoint="$3"
+            shift 3
+
+            local raw_file="${RAW}/${name}.json"
+            local err_file="${RAW}/${name}.err"
+            local wrapped_file="${OUT}/${name}.json"
+
+            if gh api --method "${method}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${endpoint}" "$@" > "${raw_file}" 2> "${err_file}"; then
+              jq -n \
+                --arg endpoint "${endpoint}" \
+                --slurpfile data "${raw_file}" \
+                '{ok:true, endpoint:$endpoint, data:$data[0]}' > "${wrapped_file}"
+            else
+              jq -n \
+                --arg endpoint "${endpoint}" \
+                --arg error "$(cat "${err_file}")" \
+                '{ok:false, endpoint:$endpoint, error:$error}' > "${wrapped_file}"
+            fi
+          }
+
+          api_capture repo GET "repos/${REPO}"
+
+          DEFAULT_BRANCH="$(jq -r '.data.default_branch // "main"' "${OUT}/repo.json")"
+
+          api_capture installation_repos GET "installation/repositories" -F per_page=100
+          api_capture branches GET "repos/${REPO}/branches" -F per_page=100
+          api_capture default_branch_protection GET "repos/${REPO}/branches/${DEFAULT_BRANCH}/protection"
+          api_capture rulesets GET "repos/${REPO}/rulesets" -F includes_parents=true -F per_page=100
+          api_capture active_branch_rules GET "repos/${REPO}/rules/branches/${DEFAULT_BRANCH}" -F per_page=100
+
+          api_capture actions_permissions GET "repos/${REPO}/actions/permissions"
+          api_capture workflow_token_permissions GET "repos/${REPO}/actions/permissions/workflow"
+          api_capture selected_actions GET "repos/${REPO}/actions/permissions/selected-actions"
+
+          api_capture actions_secrets GET "repos/${REPO}/actions/secrets" -F per_page=100
+          api_capture actions_variables GET "repos/${REPO}/actions/variables" -F per_page=100
+          api_capture environments GET "repos/${REPO}/environments" -F per_page=100
+
+          api_capture code_scanning_alerts GET "repos/${REPO}/code-scanning/alerts" -F state=open -F "ref=refs/heads/${DEFAULT_BRANCH}" -F per_page=100
+          api_capture dependabot_alerts GET "repos/${REPO}/dependabot/alerts" -F state=open -F per_page=100
+          api_capture secret_scanning_alerts GET "repos/${REPO}/secret-scanning/alerts" -F state=open -F per_page=100
+          api_capture dependency_graph_sbom GET "repos/${REPO}/dependency-graph/sbom"
+
+          api_capture deploy_keys GET "repos/${REPO}/keys" -F per_page=100
+          api_capture hooks GET "repos/${REPO}/hooks" -F per_page=100
+          api_capture collaborators GET "repos/${REPO}/collaborators" -F affiliation=all -F per_page=100
+          api_capture teams GET "repos/${REPO}/teams" -F per_page=100
+          api_capture releases GET "repos/${REPO}/releases" -F per_page=100
+          api_capture tags GET "repos/${REPO}/tags" -F per_page=100
+          api_capture open_prs GET "repos/${REPO}/pulls" -F state=open -F per_page=30
+
+          jq -n \
+            --arg target "${REPO}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg app_slug "${APP_SLUG}" \
+            --arg installation_id "${INSTALLATION_ID}" \
+            --arg desired_ruleset_profile "${DESIRED_RULESET_PROFILE}" \
+            --slurpfile repo "${OUT}/repo.json" \
+            --slurpfile installation_repos "${OUT}/installation_repos.json" \
+            --slurpfile branches "${OUT}/branches.json" \
+            --slurpfile default_branch_protection "${OUT}/default_branch_protection.json" \
+            --slurpfile rulesets "${OUT}/rulesets.json" \
+            --slurpfile active_branch_rules "${OUT}/active_branch_rules.json" \
+            --slurpfile actions_permissions "${OUT}/actions_permissions.json" \
+            --slurpfile workflow_token_permissions "${OUT}/workflow_token_permissions.json" \
+            --slurpfile selected_actions "${OUT}/selected_actions.json" \
+            --slurpfile actions_secrets "${OUT}/actions_secrets.json" \
+            --slurpfile actions_variables "${OUT}/actions_variables.json" \
+            --slurpfile environments "${OUT}/environments.json" \
+            --slurpfile code_scanning_alerts "${OUT}/code_scanning_alerts.json" \
+            --slurpfile dependabot_alerts "${OUT}/dependabot_alerts.json" \
+            --slurpfile secret_scanning_alerts "${OUT}/secret_scanning_alerts.json" \
+            --slurpfile dependency_graph_sbom "${OUT}/dependency_graph_sbom.json" \
+            --slurpfile deploy_keys "${OUT}/deploy_keys.json" \
+            --slurpfile hooks "${OUT}/hooks.json" \
+            --slurpfile collaborators "${OUT}/collaborators.json" \
+            --slurpfile teams "${OUT}/teams.json" \
+            --slurpfile releases "${OUT}/releases.json" \
+            --slurpfile tags "${OUT}/tags.json" \
+            --slurpfile open_prs "${OUT}/open_prs.json" \
+            '
+            def arr_count(x):
+              if x.ok and (x.data | type) == "array" then (x.data | length) else 0 end;
+
+            def nested_arr_count(x; key):
+              if x.ok and (x.data[key]? | type) == "array" then (x.data[key] | length) else 0 end;
+
+            def has_rule($rules; $name):
+              ($rules.ok and (($rules.data // []) | map(.type) | index($name) != null));
+
+            {
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              app: {
+                slug: $app_slug,
+                installation_id: $installation_id
+              },
+              smoke: {
+                repo_read: $repo[0].ok,
+                installation_repo_visible:
+                  ($installation_repos[0].ok and
+                   (($installation_repos[0].data.repositories // []) | map(.full_name) | index($target) != null)),
+                actions_read: $actions_permissions[0].ok,
+                rulesets_read: $rulesets[0].ok
+              },
+              audit_summary: {
+                branches: arr_count($branches[0]),
+                open_prs: arr_count($open_prs[0]),
+                open_code_scanning_alerts: arr_count($code_scanning_alerts[0]),
+                open_dependabot_alerts: arr_count($dependabot_alerts[0]),
+                secret_scanning_ok: $secret_scanning_alerts[0].ok,
+                dependency_graph_sbom_ok: $dependency_graph_sbom[0].ok,
+                repo_secrets: nested_arr_count($actions_secrets[0]; "secrets"),
+                repo_variables: nested_arr_count($actions_variables[0]; "variables"),
+                environments: nested_arr_count($environments[0]; "environments"),
+                deploy_keys: arr_count($deploy_keys[0]),
+                hooks: arr_count($hooks[0]),
+                collaborators: arr_count($collaborators[0]),
+                teams: arr_count($teams[0]),
+                releases: arr_count($releases[0]),
+                tags: arr_count($tags[0])
+              },
+              ruleset_profile: {
+                desired: $desired_ruleset_profile,
+                branch_protection_endpoint_ok: $default_branch_protection[0].ok,
+                rulesets_ok: $rulesets[0].ok,
+                active_branch_rules_ok: $active_branch_rules[0].ok,
+                has_deletion: has_rule($active_branch_rules[0]; "deletion"),
+                has_non_fast_forward: has_rule($active_branch_rules[0]; "non_fast_forward"),
+                has_required_linear_history: has_rule($active_branch_rules[0]; "required_linear_history"),
+                has_pull_request: has_rule($active_branch_rules[0]; "pull_request"),
+                has_required_status_checks: has_rule($active_branch_rules[0]; "required_status_checks")
+              },
+              diagnostics_readiness: {
+                agent_pr_diagnostics_available: true,
+                open_prs_available_for_test: arr_count($open_prs[0]),
+                note: "Run agent-pr-diagnostics.yml against any open PR before patching."
+              }
+            } as $base
+            | $base
+            | .baseline_plan = {
+                issues: (
+                  [
+                    (if (.smoke.repo_read | not) then {
+                      id:"repo-read-failed",
+                      severity:"critical",
+                      action:"Verify GitHub App repository installation/access."
+                    } else empty end),
+
+                    (if (.smoke.installation_repo_visible | not) then {
+                      id:"app-installation-repo-not-visible",
+                      severity:"critical",
+                      action:"Install or grant the GitHub App access to this repository."
+                    } else empty end),
+
+                    (if (.audit_summary.secret_scanning_ok | not) then {
+                      id:"secret-scanning-disabled-or-unavailable",
+                      severity:"high",
+                      action:"Enable secret scanning and push protection via repo-baseline-apply.yml."
+                    } else empty end),
+
+                    (if (.audit_summary.dependency_graph_sbom_ok | not) then {
+                      id:"dependency-graph-sbom-unavailable",
+                      severity:"medium",
+                      action:"Enable dependency graph/vulnerability alerts and re-check SBOM endpoint."
+                    } else empty end),
+
+                    (if ((.ruleset_profile.has_deletion and .ruleset_profile.has_non_fast_forward and .ruleset_profile.has_required_linear_history) | not) then {
+                      id:"operational-ruleset-missing",
+                      severity:"high",
+                      action:"Apply repo-ruleset-profile.yml with profile=operational."
+                    } else empty end),
+
+                    (if (.audit_summary.open_code_scanning_alerts > 0) then {
+                      id:"code-scanning-open-alerts",
+                      severity:"high",
+                      action:"Triage and fix actionable CodeQL/Scorecard alerts via PR."
+                    } else empty end),
+
+                    (if (.audit_summary.repo_secrets > 0) then {
+                      id:"repo-local-secrets-present",
+                      severity:"medium",
+                      action:"Move long-lived secrets to org/Doppler/control-plane model where possible."
+                    } else empty end)
+                  ]
+                )
+              }
+            | .baseline_apply_dry_run = {
+                mutation_performed: false,
+                planned_workflows: [
+                  "repo-baseline-apply.yml with apply=false",
+                  "repo-ruleset-profile.yml with apply=false",
+                  "repo-audit.yml after any real mutation"
+                ]
+              }
+            | .recommendation = (
+                if (.baseline_plan.issues | length) == 0 then
+                  "Repo is onboarded for the current operational baseline."
+                else
+                  "Repo needs baseline remediation before strict automation."
+                end
+              )
+            ' > "${OUT}/onboarding-report.json"
+
+          {
+            echo "### Repo Onboarding"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Default branch | ${DEFAULT_BRANCH} |"
+            echo "| App slug | ${APP_SLUG} |"
+            echo "| Installation ID | ${INSTALLATION_ID} |"
+            echo "| Issues | $(jq -r '.baseline_plan.issues | length' "${OUT}/onboarding-report.json") |"
+            echo "| Recommendation | $(jq -r '.recommendation' "${OUT}/onboarding-report.json") |"
+            echo ""
+            echo "#### Baseline issues"
+            jq -r '.baseline_plan.issues[]? | "- **\(.severity)** `\(.id)`: \(.action)"' "${OUT}/onboarding-report.json"
+            echo ""
+            echo "#### Ruleset profile"
+            jq -r '.ruleset_profile | to_entries[] | "- `\(.key)`: `\(.value)`"' "${OUT}/onboarding-report.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload onboarding report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: repo-onboarding-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14
