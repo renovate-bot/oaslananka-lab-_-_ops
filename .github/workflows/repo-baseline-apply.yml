@@ -14,7 +14,7 @@ on:
         default: boardguard
         type: string
       apply:
-        description: Apply changes. False = dry-run only.
+        description: Apply changes. False means dry-run.
         required: true
         default: false
         type: boolean
@@ -29,7 +29,7 @@ on:
         default: true
         type: boolean
       create_non_disruptive_ruleset:
-        description: Create/update main ruleset blocking deletion, force-push, and merge commits.
+        description: Create or update main ruleset blocking deletion, force-push, and merge commits.
         required: true
         default: true
         type: boolean
@@ -79,6 +79,7 @@ jobs:
           REPO="${TARGET_OWNER}/${TARGET_REPO}"
           OUT="out"
           mkdir -p "${OUT}"
+          : > "${OUT}/steps.ndjson"
 
           api() {
             gh api \
@@ -98,17 +99,28 @@ jobs:
               '{name:$name,status:$status,details:$details}' >> "${OUT}/steps.ndjson"
           }
 
-          : > "${OUT}/steps.ndjson"
+          run_api_step() {
+            local name="$1"
+            local method="$2"
+            local endpoint="$3"
+            local input_file="${4:-}"
 
-          echo "### Repo Baseline Apply" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Target | ${REPO} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Apply | ${APPLY} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Security features | ${ENABLE_SECURITY_FEATURES} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Non-disruptive ruleset | ${CREATE_NON_DISRUPTIVE_RULESET} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Enforce actions policy | ${ENFORCE_ACTIONS_POLICY} |" >> "$GITHUB_STEP_SUMMARY"
+            local err_file="${OUT}/${name}.err"
+
+            if [[ -n "${input_file}" ]]; then
+              if api --method "${method}" "${endpoint}" --input "${input_file}" > "${OUT}/${name}.json" 2> "${err_file}"; then
+                record "${name}" "applied" "${method} ${endpoint}"
+              else
+                record "${name}" "failed" "$(cat "${err_file}")"
+              fi
+            else
+              if api --method "${method}" "${endpoint}" > "${OUT}/${name}.json" 2> "${err_file}"; then
+                record "${name}" "applied" "${method} ${endpoint}"
+              else
+                record "${name}" "failed" "$(cat "${err_file}")"
+              fi
+            fi
+          }
 
           if [[ "${APPLY}" == "true" && "${APPROVAL}" != "APPLY_BASELINE" ]]; then
             echo "approval must equal APPLY_BASELINE when apply=true" >&2
@@ -116,7 +128,19 @@ jobs:
           fi
 
           DEFAULT_BRANCH="$(api --method GET "repos/${REPO}" --jq .default_branch)"
-          echo "| Default branch | ${DEFAULT_BRANCH} |" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "### Repo Baseline Apply"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Default branch | ${DEFAULT_BRANCH} |"
+            echo "| Apply | ${APPLY} |"
+            echo "| Security features | ${ENABLE_SECURITY_FEATURES} |"
+            echo "| Non-disruptive ruleset | ${CREATE_NON_DISRUPTIVE_RULESET} |"
+            echo "| Enforce actions policy | ${ENFORCE_ACTIONS_POLICY} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "${APPLY}" != "true" ]]; then
             record "dry_run" "planned" "No mutation was performed."
@@ -124,36 +148,18 @@ jobs:
 
           if [[ "${ENABLE_SECURITY_FEATURES}" == "true" ]]; then
             if [[ "${APPLY}" == "true" ]]; then
-              if api --method PUT "repos/${REPO}/vulnerability-alerts" >/dev/null 2>"${OUT}/vulnerability-alerts.err"; then
-                record "vulnerability_alerts" "applied" "Dependency alerts/dependency graph enable request accepted."
-              else
-                record "vulnerability_alerts" "failed" "$(cat "${OUT}/vulnerability-alerts.err")"
-              fi
+              run_api_step "vulnerability_alerts" "PUT" "repos/${REPO}/vulnerability-alerts"
 
-              cat > "${OUT}/security-and-analysis.json" <<'JSON'
-{
-  "security_and_analysis": {
-    "secret_scanning": {
-      "status": "enabled"
-    },
-    "secret_scanning_push_protection": {
-      "status": "enabled"
-    },
-    "secret_scanning_ai_detection": {
-      "status": "enabled"
-    },
-    "secret_scanning_non_provider_patterns": {
-      "status": "enabled"
-    }
-  }
-}
-JSON
+              jq -n '{
+                security_and_analysis: {
+                  secret_scanning: {status: "enabled"},
+                  secret_scanning_push_protection: {status: "enabled"},
+                  secret_scanning_ai_detection: {status: "enabled"},
+                  secret_scanning_non_provider_patterns: {status: "enabled"}
+                }
+              }' > "${OUT}/security-and-analysis.json"
 
-              if api --method PATCH "repos/${REPO}" --input "${OUT}/security-and-analysis.json" >/dev/null 2>"${OUT}/security-and-analysis.err"; then
-                record "security_and_analysis" "applied" "Secret scanning and push protection enable request accepted."
-              else
-                record "security_and_analysis" "failed" "$(cat "${OUT}/security-and-analysis.err")"
-              fi
+              run_api_step "security_and_analysis" "PATCH" "repos/${REPO}" "${OUT}/security-and-analysis.json"
             else
               record "vulnerability_alerts" "planned" "Would enable vulnerability alerts/dependency graph."
               record "security_and_analysis" "planned" "Would enable secret scanning and push protection."
@@ -161,32 +167,22 @@ JSON
           fi
 
           if [[ "${CREATE_NON_DISRUPTIVE_RULESET}" == "true" ]]; then
-            cat > "${OUT}/main-ruleset.json" <<'JSON'
-{
-  "name": "repo-ops main baseline",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": [
-        "~DEFAULT_BRANCH"
-      ],
-      "exclude": []
-    }
-  },
-  "rules": [
-    {
-      "type": "deletion"
-    },
-    {
-      "type": "non_fast_forward"
-    },
-    {
-      "type": "required_linear_history"
-    }
-  ]
-}
-JSON
+            jq -n '{
+              name: "repo-ops main baseline",
+              target: "branch",
+              enforcement: "active",
+              conditions: {
+                ref_name: {
+                  include: ["~DEFAULT_BRANCH"],
+                  exclude: []
+                }
+              },
+              rules: [
+                {type: "deletion"},
+                {type: "non_fast_forward"},
+                {type: "required_linear_history"}
+              ]
+            }' > "${OUT}/main-ruleset.json"
 
             EXISTING_RULESET_ID="$(
               api --method GET "repos/${REPO}/rulesets" -F includes_parents=false --jq '.[] | select(.name == "repo-ops main baseline") | .id' 2>/dev/null | head -n 1 || true
@@ -194,17 +190,9 @@ JSON
 
             if [[ "${APPLY}" == "true" ]]; then
               if [[ -n "${EXISTING_RULESET_ID}" ]]; then
-                if api --method PUT "repos/${REPO}/rulesets/${EXISTING_RULESET_ID}" --input "${OUT}/main-ruleset.json" >/dev/null 2>"${OUT}/ruleset.err"; then
-                  record "main_ruleset" "updated" "Updated repository ruleset id=${EXISTING_RULESET_ID}."
-                else
-                  record "main_ruleset" "failed" "$(cat "${OUT}/ruleset.err")"
-                fi
+                run_api_step "main_ruleset" "PUT" "repos/${REPO}/rulesets/${EXISTING_RULESET_ID}" "${OUT}/main-ruleset.json"
               else
-                if api --method POST "repos/${REPO}/rulesets" --input "${OUT}/main-ruleset.json" >/dev/null 2>"${OUT}/ruleset.err"; then
-                  record "main_ruleset" "created" "Created non-disruptive default-branch ruleset."
-                else
-                  record "main_ruleset" "failed" "$(cat "${OUT}/ruleset.err")"
-                fi
+                run_api_step "main_ruleset" "POST" "repos/${REPO}/rulesets" "${OUT}/main-ruleset.json"
               fi
             else
               record "main_ruleset" "planned" "Would create/update non-disruptive default-branch ruleset."
@@ -213,73 +201,52 @@ JSON
 
           if [[ "${ENFORCE_ACTIONS_POLICY}" == "true" ]]; then
             if [[ "${APPLY}" == "true" ]]; then
-              cat > "${OUT}/actions-permissions.json" <<'JSON'
-{
-  "enabled": true,
-  "allowed_actions": "selected",
-  "sha_pinning_required": true
-}
-JSON
+              jq -n '{
+                enabled: true,
+                allowed_actions: "selected",
+                sha_pinning_required: true
+              }' > "${OUT}/actions-permissions.json"
 
-              cat > "${OUT}/selected-actions.json" <<'JSON'
-{
-  "github_owned_allowed": true,
-  "verified_allowed": false,
-  "patterns_allowed": []
-}
-JSON
+              jq -n '{
+                github_owned_allowed: true,
+                verified_allowed: false,
+                patterns_allowed: []
+              }' > "${OUT}/selected-actions.json"
 
-              cat > "${OUT}/workflow-token.json" <<'JSON'
-{
-  "default_workflow_permissions": "read",
-  "can_approve_pull_request_reviews": false
-}
-JSON
+              jq -n '{
+                default_workflow_permissions: "read",
+                can_approve_pull_request_reviews: false
+              }' > "${OUT}/workflow-token.json"
 
-              if api --method PUT "repos/${REPO}/actions/permissions" --input "${OUT}/actions-permissions.json" >/dev/null 2>"${OUT}/actions-permissions.err"; then
-                record "actions_permissions" "applied" "Set selected actions and SHA pinning."
-              else
-                record "actions_permissions" "failed" "$(cat "${OUT}/actions-permissions.err")"
-              fi
-
-              if api --method PUT "repos/${REPO}/actions/permissions/selected-actions" --input "${OUT}/selected-actions.json" >/dev/null 2>"${OUT}/selected-actions.err"; then
-                record "selected_actions" "applied" "Allowed GitHub-owned actions only."
-              else
-                record "selected_actions" "failed" "$(cat "${OUT}/selected-actions.err")"
-              fi
-
-              if api --method PUT "repos/${REPO}/actions/permissions/workflow" --input "${OUT}/workflow-token.json" >/dev/null 2>"${OUT}/workflow-token.err"; then
-                record "workflow_token_permissions" "applied" "Set default GITHUB_TOKEN permission to read."
-              else
-                record "workflow_token_permissions" "failed" "$(cat "${OUT}/workflow-token.err")"
-              fi
+              run_api_step "actions_permissions" "PUT" "repos/${REPO}/actions/permissions" "${OUT}/actions-permissions.json"
+              run_api_step "selected_actions" "PUT" "repos/${REPO}/actions/permissions/selected-actions" "${OUT}/selected-actions.json"
+              run_api_step "workflow_token_permissions" "PUT" "repos/${REPO}/actions/permissions/workflow" "${OUT}/workflow-token.json"
             else
-              record "actions_permissions" "planned" "Would enforce selected actions + SHA pinning."
+              record "actions_permissions" "planned" "Would enforce selected actions and SHA pinning."
             fi
           else
             record "actions_permissions" "deferred" "Not enforcing until workflows are audited and SHA-pinned."
           fi
 
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "#### Mutation report" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Step | Status | Details |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---|---:|---|" >> "$GITHUB_STEP_SUMMARY"
-
           jq -s '.' "${OUT}/steps.ndjson" > "${OUT}/baseline-apply-report.json"
 
-          jq -r '.[] | "| \(.name) | \(.status) | \(.details | gsub("\n"; " ")) |"' "${OUT}/baseline-apply-report.json" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "#### Post-check" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "#### Mutation report"
+            echo ""
+            echo "| Step | Status | Details |"
+            echo "|---|---:|---|"
+            jq -r '.[] | "| \(.name) | \(.status) | \(.details | gsub("\n"; " ")) |"' "${OUT}/baseline-apply-report.json"
+            echo ""
+            echo "#### Post-check"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           api --method GET "repos/${REPO}" > "${OUT}/repo-after.json" || true
           api --method GET "repos/${REPO}/rules/branches/${DEFAULT_BRANCH}" -F per_page=100 > "${OUT}/active-branch-rules-after.json" || true
           api --method GET "repos/${REPO}/actions/permissions" > "${OUT}/actions-permissions-after.json" || true
           api --method GET "repos/${REPO}/actions/permissions/workflow" > "${OUT}/workflow-token-after.json" || true
-          api --method GET "repos/${REPO}/secret-scanning/alerts" -F state=open -F per_page=1 > "${OUT}/secret-scanning-alerts-after.json" 2>"${OUT}/secret-scanning-alerts-after.err" || true
-          api --method GET "repos/${REPO}/dependency-graph/sbom" > "${OUT}/sbom-after.json" 2>"${OUT}/sbom-after.err" || true
+          api --method GET "repos/${REPO}/secret-scanning/alerts" -F state=open -F per_page=1 > "${OUT}/secret-scanning-alerts-after.json" 2> "${OUT}/secret-scanning-alerts-after.err" || true
+          api --method GET "repos/${REPO}/dependency-graph/sbom" > "${OUT}/sbom-after.json" 2> "${OUT}/sbom-after.err" || true
 
           echo "- active branch rules: $(jq 'length' "${OUT}/active-branch-rules-after.json" 2>/dev/null || echo unavailable)" >> "$GITHUB_STEP_SUMMARY"
           echo "- actions permissions: $(jq -c '.' "${OUT}/actions-permissions-after.json" 2>/dev/null || echo unavailable)" >> "$GITHUB_STEP_SUMMARY"
