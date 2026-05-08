@@ -1,0 +1,207 @@
+name: Repo Baseline Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        default: boardguard
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-baseline-plan-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Build baseline plan
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          mkdir -p "${OUT}"
+
+          api_json() {
+            local name="$1"
+            local endpoint="$2"
+            shift 2
+            if gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${endpoint}" "$@" > "${OUT}/${name}.json" 2> "${OUT}/${name}.err"; then
+              jq -n --arg ok "true" --slurpfile data "${OUT}/${name}.json" '{ok:true,data:$data[0]}' > "${OUT}/${name}.wrapped.json"
+            else
+              jq -n --arg error "$(cat "${OUT}/${name}.err")" '{ok:false,error:$error}' > "${OUT}/${name}.wrapped.json"
+            fi
+          }
+
+          api_json repo "repos/${REPO}"
+          DEFAULT_BRANCH="$(jq -r '.data.default_branch // "main"' "${OUT}/repo.wrapped.json")"
+
+          api_json branch_protection "repos/${REPO}/branches/${DEFAULT_BRANCH}/protection"
+          api_json rulesets "repos/${REPO}/rulesets" -F includes_parents=true -F per_page=100
+          api_json active_branch_rules "repos/${REPO}/rules/branches/${DEFAULT_BRANCH}" -F per_page=100
+          api_json actions_permissions "repos/${REPO}/actions/permissions"
+          api_json workflow_token_permissions "repos/${REPO}/actions/permissions/workflow"
+          api_json selected_actions "repos/${REPO}/actions/permissions/selected-actions"
+          api_json code_scanning_alerts "repos/${REPO}/code-scanning/alerts" -F state=open -F "ref=refs/heads/${DEFAULT_BRANCH}" -F per_page=100
+          api_json dependabot_alerts "repos/${REPO}/dependabot/alerts" -F state=open -F per_page=100
+          api_json secret_scanning_alerts "repos/${REPO}/secret-scanning/alerts" -F state=open -F per_page=100
+          api_json dependency_graph_sbom "repos/${REPO}/dependency-graph/sbom"
+          api_json releases "repos/${REPO}/releases" -F per_page=100
+          api_json tags "repos/${REPO}/tags" -F per_page=100
+          api_json actions_secrets "repos/${REPO}/actions/secrets" -F per_page=100
+          api_json actions_variables "repos/${REPO}/actions/variables" -F per_page=100
+          api_json environments "repos/${REPO}/environments" -F per_page=100
+
+          jq -n \
+            --arg target "${REPO}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --slurpfile repo "${OUT}/repo.wrapped.json" \
+            --slurpfile branch_protection "${OUT}/branch_protection.wrapped.json" \
+            --slurpfile rulesets "${OUT}/rulesets.wrapped.json" \
+            --slurpfile active_branch_rules "${OUT}/active_branch_rules.wrapped.json" \
+            --slurpfile actions_permissions "${OUT}/actions_permissions.wrapped.json" \
+            --slurpfile workflow_token_permissions "${OUT}/workflow_token_permissions.wrapped.json" \
+            --slurpfile selected_actions "${OUT}/selected_actions.wrapped.json" \
+            --slurpfile code_scanning_alerts "${OUT}/code_scanning_alerts.wrapped.json" \
+            --slurpfile dependabot_alerts "${OUT}/dependabot_alerts.wrapped.json" \
+            --slurpfile secret_scanning_alerts "${OUT}/secret_scanning_alerts.wrapped.json" \
+            --slurpfile dependency_graph_sbom "${OUT}/dependency_graph_sbom.wrapped.json" \
+            --slurpfile releases "${OUT}/releases.wrapped.json" \
+            --slurpfile tags "${OUT}/tags.wrapped.json" \
+            --slurpfile actions_secrets "${OUT}/actions_secrets.wrapped.json" \
+            --slurpfile actions_variables "${OUT}/actions_variables.wrapped.json" \
+            --slurpfile environments "${OUT}/environments.wrapped.json" \
+            '
+            def count_array(x): if x.ok and (x.data|type) == "array" then (x.data|length) else 0 end;
+            def add_issue($arr; $id; $severity; $title; $reason; $recommended_action; $mutation_class):
+              $arr + [{
+                id: $id,
+                severity: $severity,
+                title: $title,
+                reason: $reason,
+                recommended_action: $recommended_action,
+                mutation_class: $mutation_class
+              }];
+
+            {
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              observed: {
+                branch_protection_ok: $branch_protection[0].ok,
+                rulesets_ok: $rulesets[0].ok,
+                active_branch_rule_count: count_array($active_branch_rules[0]),
+                actions_permissions_ok: $actions_permissions[0].ok,
+                workflow_token_permissions_ok: $workflow_token_permissions[0].ok,
+                selected_actions_ok: $selected_actions[0].ok,
+                code_scanning_open_alerts: count_array($code_scanning_alerts[0]),
+                dependabot_open_alerts: count_array($dependabot_alerts[0]),
+                secret_scanning_ok: $secret_scanning_alerts[0].ok,
+                dependency_graph_sbom_ok: $dependency_graph_sbom[0].ok,
+                releases: count_array($releases[0]),
+                tags: count_array($tags[0]),
+                repo_secrets: (if $actions_secrets[0].ok and ($actions_secrets[0].data.secrets? | type) == "array" then ($actions_secrets[0].data.secrets|length) else 0 end),
+                repo_variables: (if $actions_variables[0].ok and ($actions_variables[0].data.variables? | type) == "array" then ($actions_variables[0].data.variables|length) else 0 end),
+                environments: (if $environments[0].ok and ($environments[0].data.environments? | type) == "array" then ($environments[0].data.environments|length) else 0 end)
+              }
+            } as $base
+            | reduce [
+                (if ($branch_protection[0].ok | not) then {
+                  id:"main-unprotected",
+                  severity:"high",
+                  title:"Default branch is not protected",
+                  reason:$branch_protection[0].error,
+                  recommended_action:"Create repository ruleset for main with non-destructive baseline: block force pushes, block deletions, require linear history, require PR for human writes; keep admin/automation bypass explicit.",
+                  mutation_class:"ruleset"
+                } else empty end),
+                (if ($secret_scanning_alerts[0].ok | not) then {
+                  id:"secret-scanning-disabled-or-unavailable",
+                  severity:"high",
+                  title:"Secret scanning endpoint unavailable",
+                  reason:$secret_scanning_alerts[0].error,
+                  recommended_action:"Enable secret scanning and push protection if plan/features allow it; otherwise document plan limitation.",
+                  mutation_class:"security_and_analysis"
+                } else empty end),
+                (if ($selected_actions[0].ok | not) then {
+                  id:"actions-all-allowed",
+                  severity:"medium",
+                  title:"All actions/workflows are allowed",
+                  reason:$selected_actions[0].error,
+                  recommended_action:"Set Actions policy to selected with github-owned actions allowed, verified creators disabled, and explicit allowlist for required third-party actions; keep SHA pinning required where supported.",
+                  mutation_class:"actions_policy"
+                } else empty end),
+                (if ($dependency_graph_sbom[0].ok | not) then {
+                  id:"dependency-graph-sbom-unavailable",
+                  severity:"medium",
+                  title:"Dependency graph SBOM endpoint unavailable",
+                  reason:$dependency_graph_sbom[0].error,
+                  recommended_action:"Verify dependency graph availability and enable dependency graph/dependency submission where supported.",
+                  mutation_class:"security_and_analysis"
+                } else empty end),
+                (if (count_array($code_scanning_alerts[0]) > 0) then {
+                  id:"code-scanning-open-alerts",
+                  severity:"high",
+                  title:"Open code scanning alerts exist",
+                  reason:("open_alerts=" + ((count_array($code_scanning_alerts[0]))|tostring)),
+                  recommended_action:"Triage and fix CodeQL/code scanning findings before making release/publish workflows authoritative.",
+                  mutation_class:"source_or_workflow_fix"
+                } else empty end)
+              ][] as $issue
+              ($base + {issues: []}; .issues += [$issue])
+            ' > "${OUT}/baseline-plan.json"
+
+          {
+            echo "### Repo Baseline Plan"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | $(jq -r .target "${OUT}/baseline-plan.json") |"
+            echo "| Default branch | $(jq -r .default_branch "${OUT}/baseline-plan.json") |"
+            echo "| Issues | $(jq -r '.issues | length' "${OUT}/baseline-plan.json") |"
+            echo "| Code scanning alerts | $(jq -r '.observed.code_scanning_open_alerts' "${OUT}/baseline-plan.json") |"
+            echo "| Branch protection OK | $(jq -r '.observed.branch_protection_ok' "${OUT}/baseline-plan.json") |"
+            echo "| Secret scanning OK | $(jq -r '.observed.secret_scanning_ok' "${OUT}/baseline-plan.json") |"
+            echo ""
+            echo "#### Issues"
+            echo ""
+            jq -r '.issues[] | "- **\(.severity)** `\(.id)`: \(.title) — \(.recommended_action)"' "${OUT}/baseline-plan.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload baseline plan artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: baseline-plan-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/baseline-plan.json
+          retention-days: 14
