@@ -1,0 +1,180 @@
+name: Repo Ruleset Profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        required: true
+        default: boardguard
+        type: string
+      profile:
+        description: operational or strict-scorecard
+        required: true
+        default: operational
+        type: choice
+        options:
+          - operational
+          - strict-scorecard
+      apply:
+        required: true
+        default: false
+        type: boolean
+      approval:
+        description: Required when apply=true. Must equal APPLY_RULESET.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ruleset-profile-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  ruleset:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Apply ruleset profile
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          PROFILE: ${{ inputs.profile }}
+          APPLY: ${{ inputs.apply }}
+          APPROVAL: ${{ inputs.approval }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          mkdir -p "${OUT}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          if [[ "${APPLY}" == "true" && "${APPROVAL}" != "APPLY_RULESET" ]]; then
+            echo "approval must equal APPLY_RULESET when apply=true" >&2
+            exit 1
+          fi
+
+          DEFAULT_BRANCH="$(api --method GET "repos/${REPO}" --jq .default_branch)"
+
+          EXISTING_RULESET_ID="$(
+            api --method GET "repos/${REPO}/rulesets" -F includes_parents=false \
+              --jq '.[] | select(.name == "repo-ops main baseline") | .id' 2>/dev/null |
+              head -n 1 || true
+          )"
+
+          if [[ "${PROFILE}" == "operational" ]]; then
+            jq -n '{
+              name: "repo-ops main baseline",
+              target: "branch",
+              enforcement: "active",
+              conditions: {
+                ref_name: {
+                  include: ["~DEFAULT_BRANCH"],
+                  exclude: []
+                }
+              },
+              rules: [
+                {type: "deletion"},
+                {type: "non_fast_forward"},
+                {type: "required_linear_history"}
+              ]
+            }' > "${OUT}/ruleset.json"
+          elif [[ "${PROFILE}" == "strict-scorecard" ]]; then
+            jq -n '{
+              name: "repo-ops main baseline",
+              target: "branch",
+              enforcement: "active",
+              conditions: {
+                ref_name: {
+                  include: ["~DEFAULT_BRANCH"],
+                  exclude: []
+                }
+              },
+              rules: [
+                {type: "deletion"},
+                {type: "non_fast_forward"},
+                {type: "required_linear_history"},
+                {
+                  type: "pull_request",
+                  parameters: {
+                    allowed_merge_methods: ["squash"],
+                    dismiss_stale_reviews_on_push: false,
+                    require_code_owner_review: false,
+                    require_last_push_approval: false,
+                    required_approving_review_count: 1,
+                    required_review_thread_resolution: true
+                  }
+                },
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    do_not_enforce_on_create: true,
+                    strict_required_status_checks_policy: true,
+                    required_status_checks: [
+                      {context: "Validate (ubuntu-24.04)"},
+                      {context: "security"},
+                      {context: "review-thread-gate"}
+                    ]
+                  }
+                }
+              ]
+            }' > "${OUT}/ruleset.json"
+          else
+            echo "unsupported profile: ${PROFILE}" >&2
+            exit 1
+          fi
+
+          echo "### Repo Ruleset Profile" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | ${REPO} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Default branch | ${DEFAULT_BRANCH} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Profile | ${PROFILE} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Apply | ${APPLY} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Existing ruleset | ${EXISTING_RULESET_ID:-none} |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${APPLY}" == "true" ]]; then
+            if [[ -n "${EXISTING_RULESET_ID}" ]]; then
+              api --method PUT "repos/${REPO}/rulesets/${EXISTING_RULESET_ID}" --input "${OUT}/ruleset.json" > "${OUT}/ruleset-result.json"
+              echo "| Mutation | updated |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              api --method POST "repos/${REPO}/rulesets" --input "${OUT}/ruleset.json" > "${OUT}/ruleset-result.json"
+              echo "| Mutation | created |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            cp "${OUT}/ruleset.json" "${OUT}/ruleset-result.json"
+            echo "| Mutation | dry-run |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          api --method GET "repos/${REPO}/rules/branches/${DEFAULT_BRANCH}" -F per_page=100 > "${OUT}/active-rules.json" || true
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Active rule types" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[].type | "- `" + . + "`"' "${OUT}/active-rules.json" >> "$GITHUB_STEP_SUMMARY" || true
