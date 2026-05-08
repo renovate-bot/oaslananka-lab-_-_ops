@@ -120,7 +120,7 @@ jobs:
               > "${LOGS}/run-${run_id}.log" 2> "${LOGS}/run-${run_id}.err" || true
           done < "${OUT}/failed-run-ids.txt"
 
-          GRAPHQL_QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id body createdAt updatedAt author{login}}}}}}}'
+          GRAPHQL_QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id body createdAt updatedAt author{login}}}}}}}}'
 
           gh api graphql \
             -f query="${GRAPHQL_QUERY}" \
@@ -202,8 +202,11 @@ jobs:
           jq -r '.[] | "- `" + (.path // "unknown") + ":" + ((.line // .startLine // 0)|tostring) + "` thread `" + .id + "`"' "${OUT}/unresolved-review-threads.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload diagnostics artifact
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: agent-pr-diagnostics-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
           path: out/
           retention-days: 14
+
+
