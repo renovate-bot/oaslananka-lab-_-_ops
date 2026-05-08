@@ -1,0 +1,209 @@
+name: Agent PR Diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        default: boardguard
+        type: string
+      pr_number:
+        description: Pull request number to diagnose
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-pr-diagnostics-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Collect PR diagnostics
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          LOGS="${OUT}/failed-run-logs"
+
+          mkdir -p "${RAW}" "${LOGS}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          echo "### Agent PR Diagnostics" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repository | ${REPO} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| PR | #${PR_NUMBER} |" >> "$GITHUB_STEP_SUMMARY"
+
+          gh pr view "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --json number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName,baseRefName,headRefOid,baseRefOid,url,author,files,statusCheckRollup \
+            > "${OUT}/pr.json"
+
+          HEAD_REF="$(jq -r '.headRefName' "${OUT}/pr.json")"
+          BASE_REF="$(jq -r '.baseRefName' "${OUT}/pr.json")"
+          HEAD_SHA="$(jq -r '.headRefOid' "${OUT}/pr.json")"
+          PR_STATE="$(jq -r '.state' "${OUT}/pr.json")"
+          IS_DRAFT="$(jq -r '.isDraft' "${OUT}/pr.json")"
+
+          echo "| Head ref | ${HEAD_REF} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Base ref | ${BASE_REF} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Head SHA | ${HEAD_SHA} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| State | ${PR_STATE} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Draft | ${IS_DRAFT} |" >> "$GITHUB_STEP_SUMMARY"
+
+          gh pr checks "${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --json name,workflow,state,bucket,link,startedAt,completedAt \
+            > "${OUT}/pr-checks.json" 2> "${OUT}/pr-checks.err" || true
+
+          gh run list \
+            --repo "${REPO}" \
+            --branch "${HEAD_REF}" \
+            --limit 30 \
+            --json databaseId,name,status,conclusion,workflowName,createdAt,updatedAt,url,headSha,event \
+            > "${OUT}/runs.json"
+
+          jq -r '.[] | select(.status == "completed" and .conclusion == "failure") | .databaseId' "${OUT}/runs.json" \
+            > "${OUT}/failed-run-ids.txt"
+
+          while IFS= read -r run_id; do
+            if [[ -z "${run_id}" ]]; then
+              continue
+            fi
+
+            gh run view "${run_id}" \
+              --repo "${REPO}" \
+              --json databaseId,name,displayTitle,status,conclusion,event,workflowName,url,jobs \
+              > "${RAW}/run-${run_id}.json" 2> "${RAW}/run-${run_id}.err" || true
+
+            gh run view "${run_id}" \
+              --repo "${REPO}" \
+              --log-failed \
+              > "${LOGS}/run-${run_id}.log" 2> "${LOGS}/run-${run_id}.err" || true
+          done < "${OUT}/failed-run-ids.txt"
+
+          GRAPHQL_QUERY='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{id isResolved isOutdated path line startLine comments(first:50){nodes{id body createdAt updatedAt author{login}}}}}}}'
+
+          gh api graphql \
+            -f query="${GRAPHQL_QUERY}" \
+            -f owner="${TARGET_OWNER}" \
+            -f repo="${TARGET_REPO}" \
+            -F number="${PR_NUMBER}" \
+            > "${OUT}/review-threads.json"
+
+          jq '
+            .data.repository.pullRequest.reviewThreads.nodes
+            | map(select(.isResolved == false))
+          ' "${OUT}/review-threads.json" > "${OUT}/unresolved-review-threads.json"
+
+          jq -n \
+            --slurpfile pr "${OUT}/pr.json" \
+            --slurpfile checks "${OUT}/pr-checks.json" \
+            --slurpfile runs "${OUT}/runs.json" \
+            --slurpfile threads "${OUT}/unresolved-review-threads.json" \
+            '{
+              pr: $pr[0],
+              check_summary: {
+                total: ($checks[0] | length),
+                failing: ($checks[0] | map(select(.bucket == "fail")) | length),
+                pending: ($checks[0] | map(select(.bucket == "pending")) | length),
+                successful: ($checks[0] | map(select(.bucket == "pass")) | length),
+                skipped: ($checks[0] | map(select(.bucket == "skipping")) | length)
+              },
+              run_summary: {
+                total: ($runs[0] | length),
+                failures: ($runs[0] | map(select(.conclusion == "failure")) | length),
+                successes: ($runs[0] | map(select(.conclusion == "success")) | length),
+                skipped: ($runs[0] | map(select(.conclusion == "skipped")) | length)
+              },
+              unresolved_review_threads: $threads[0]
+            }' > "${OUT}/diagnostics.json"
+
+          {
+            echo "# Agent PR Fix Loop Input"
+            echo ""
+            echo "Repository: ${REPO}"
+            echo "PR: #${PR_NUMBER}"
+            echo "Head branch: ${HEAD_REF}"
+            echo "Base branch: ${BASE_REF}"
+            echo "Head SHA: ${HEAD_SHA}"
+            echo ""
+            echo "## Required operating loop"
+            echo ""
+            echo "1. Inspect diagnostics.json first."
+            echo "2. If unresolved-review-threads.json is non-empty, implement or explicitly resolve every actionable thread."
+            echo "3. If failed-run-logs contains logs, fix the first deterministic failure before touching unrelated code."
+            echo "4. Run the repo's local format/lint/test commands."
+            echo "5. Push to the same PR branch."
+            echo "6. Re-check PR checks until all required checks are green."
+            echo "7. Do not create extra branches or extra PRs."
+            echo "8. Do not merge unless checks are green and review threads are resolved."
+          } > "${OUT}/agent-next-step.md"
+
+          FAILING_CHECKS="$(jq -r '.check_summary.failing' "${OUT}/diagnostics.json")"
+          PENDING_CHECKS="$(jq -r '.check_summary.pending' "${OUT}/diagnostics.json")"
+          FAILED_RUNS="$(jq -r '.run_summary.failures' "${OUT}/diagnostics.json")"
+          UNRESOLVED_THREADS="$(jq -r '.unresolved_review_threads | length' "${OUT}/diagnostics.json")"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Diagnostic summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Failing checks | ${FAILING_CHECKS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Pending checks | ${PENDING_CHECKS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Failed workflow runs | ${FAILED_RUNS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Unresolved review threads | ${UNRESOLVED_THREADS} |" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Failed runs" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | select(.conclusion == "failure") | "- `" + (.databaseId|tostring) + "` " + .workflowName + " / " + .name + " — " + .url' "${OUT}/runs.json" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Unresolved review threads" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | "- `" + (.path // "unknown") + ":" + ((.line // .startLine // 0)|tostring) + "` thread `" + .id + "`"' "${OUT}/unresolved-review-threads.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload diagnostics artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: agent-pr-diagnostics-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+          path: out/
+          retention-days: 14
