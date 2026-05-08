@@ -1,0 +1,225 @@
+name: Repo Ops Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        default: test
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ops-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Audit target repository
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          ERR="${OUT}/errors"
+          mkdir -p "${RAW}" "${ERR}"
+
+          api_capture() {
+            local name="$1"
+            local endpoint="$2"
+            shift 2
+
+            local raw_file="${RAW}/${name}.json"
+            local err_file="${ERR}/${name}.txt"
+            local wrapped_file="${OUT}/${name}.json"
+
+            if gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${endpoint}" "$@" > "${raw_file}" 2> "${err_file}"; then
+
+              jq -n \
+                --arg endpoint "${endpoint}" \
+                --slurpfile data "${raw_file}" \
+                '{ok:true, endpoint:$endpoint, data:$data[0]}' > "${wrapped_file}"
+            else
+              jq -n \
+                --arg endpoint "${endpoint}" \
+                --arg error "$(cat "${err_file}")" \
+                '{ok:false, endpoint:$endpoint, error:$error}' > "${wrapped_file}"
+            fi
+          }
+
+          api_capture repo "repos/${REPO}"
+
+          DEFAULT_BRANCH="$(jq -r '.data.default_branch // "main"' "${OUT}/repo.json")"
+
+          api_capture branches "repos/${REPO}/branches" -F per_page=100
+          api_capture default_branch_protection "repos/${REPO}/branches/${DEFAULT_BRANCH}/protection"
+          api_capture rulesets "repos/${REPO}/rulesets" -F includes_parents=true -F per_page=100
+          api_capture active_branch_rules "repos/${REPO}/rules/branches/${DEFAULT_BRANCH}" -F per_page=100
+          api_capture rule_suites "repos/${REPO}/rulesets/rule-suites" -F "ref=refs/heads/${DEFAULT_BRANCH}" -F time_period=month -F rule_suite_result=all -F per_page=100
+
+          api_capture code_scanning_alerts "repos/${REPO}/code-scanning/alerts" -F state=open -F "ref=refs/heads/${DEFAULT_BRANCH}" -F per_page=100
+          api_capture dependabot_alerts "repos/${REPO}/dependabot/alerts" -F state=open -F per_page=100
+          api_capture secret_scanning_alerts "repos/${REPO}/secret-scanning/alerts" -F state=open -F per_page=100
+
+          api_capture actions_permissions "repos/${REPO}/actions/permissions"
+          api_capture workflow_token_permissions "repos/${REPO}/actions/permissions/workflow"
+          api_capture selected_actions "repos/${REPO}/actions/permissions/selected-actions"
+
+          api_capture actions_secrets "repos/${REPO}/actions/secrets" -F per_page=100
+          api_capture organization_actions_secrets "repos/${REPO}/actions/organization-secrets" -F per_page=100
+          api_capture actions_variables "repos/${REPO}/actions/variables" -F per_page=100
+          api_capture environments "repos/${REPO}/environments" -F per_page=100
+
+          api_capture collaborators "repos/${REPO}/collaborators" -F affiliation=all -F per_page=100
+          api_capture teams "repos/${REPO}/teams" -F per_page=100
+          api_capture deploy_keys "repos/${REPO}/keys" -F per_page=100
+          api_capture hooks "repos/${REPO}/hooks" -F per_page=100
+
+          api_capture dependency_graph_sbom "repos/${REPO}/dependency-graph/sbom"
+          api_capture releases "repos/${REPO}/releases" -F per_page=100
+          api_capture tags "repos/${REPO}/tags" -F per_page=100
+          api_capture immutable_releases "repos/${REPO}/immutable-releases"
+
+          GENERATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          jq -n \
+            --arg generated_at "${GENERATED_AT}" \
+            --arg target "${REPO}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            --arg app_slug "${{ steps.app.outputs.app-slug }}" \
+            --arg installation_id "${{ steps.app.outputs.installation-id }}" \
+            --slurpfile repo "${OUT}/repo.json" \
+            --slurpfile branches "${OUT}/branches.json" \
+            --slurpfile default_branch_protection "${OUT}/default_branch_protection.json" \
+            --slurpfile rulesets "${OUT}/rulesets.json" \
+            --slurpfile active_branch_rules "${OUT}/active_branch_rules.json" \
+            --slurpfile rule_suites "${OUT}/rule_suites.json" \
+            --slurpfile code_scanning_alerts "${OUT}/code_scanning_alerts.json" \
+            --slurpfile dependabot_alerts "${OUT}/dependabot_alerts.json" \
+            --slurpfile secret_scanning_alerts "${OUT}/secret_scanning_alerts.json" \
+            --slurpfile actions_permissions "${OUT}/actions_permissions.json" \
+            --slurpfile workflow_token_permissions "${OUT}/workflow_token_permissions.json" \
+            --slurpfile selected_actions "${OUT}/selected_actions.json" \
+            --slurpfile actions_secrets "${OUT}/actions_secrets.json" \
+            --slurpfile organization_actions_secrets "${OUT}/organization_actions_secrets.json" \
+            --slurpfile actions_variables "${OUT}/actions_variables.json" \
+            --slurpfile environments "${OUT}/environments.json" \
+            --slurpfile collaborators "${OUT}/collaborators.json" \
+            --slurpfile teams "${OUT}/teams.json" \
+            --slurpfile deploy_keys "${OUT}/deploy_keys.json" \
+            --slurpfile hooks "${OUT}/hooks.json" \
+            --slurpfile dependency_graph_sbom "${OUT}/dependency_graph_sbom.json" \
+            --slurpfile releases "${OUT}/releases.json" \
+            --slurpfile tags "${OUT}/tags.json" \
+            --slurpfile immutable_releases "${OUT}/immutable_releases.json" \
+            '{
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              app_slug: $app_slug,
+              installation_id: $installation_id,
+              sections: {
+                repo: $repo[0],
+                branches: $branches[0],
+                default_branch_protection: $default_branch_protection[0],
+                rulesets: $rulesets[0],
+                active_branch_rules: $active_branch_rules[0],
+                rule_suites: $rule_suites[0],
+                code_scanning_alerts: $code_scanning_alerts[0],
+                dependabot_alerts: $dependabot_alerts[0],
+                secret_scanning_alerts: $secret_scanning_alerts[0],
+                actions_permissions: $actions_permissions[0],
+                workflow_token_permissions: $workflow_token_permissions[0],
+                selected_actions: $selected_actions[0],
+                actions_secrets: $actions_secrets[0],
+                organization_actions_secrets: $organization_actions_secrets[0],
+                actions_variables: $actions_variables[0],
+                environments: $environments[0],
+                collaborators: $collaborators[0],
+                teams: $teams[0],
+                deploy_keys: $deploy_keys[0],
+                hooks: $hooks[0],
+                dependency_graph_sbom: $dependency_graph_sbom[0],
+                releases: $releases[0],
+                tags: $tags[0],
+                immutable_releases: $immutable_releases[0]
+              }
+            }' > "${OUT}/repo-audit.json"
+
+          count_array() {
+            local file="$1"
+            jq -r 'if .ok and (.data | type == "array") then (.data | length) else 0 end' "${file}"
+          }
+
+          CODE_ALERTS="$(count_array "${OUT}/code_scanning_alerts.json")"
+          DEPENDABOT_ALERTS="$(count_array "${OUT}/dependabot_alerts.json")"
+          SECRET_ALERTS="$(count_array "${OUT}/secret_scanning_alerts.json")"
+          BRANCH_COUNT="$(count_array "${OUT}/branches.json")"
+          RELEASE_COUNT="$(count_array "${OUT}/releases.json")"
+          TAG_COUNT="$(count_array "${OUT}/tags.json")"
+
+          {
+            echo "### Repo Ops Audit"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Default branch | ${DEFAULT_BRANCH} |"
+            echo "| Branches | ${BRANCH_COUNT} |"
+            echo "| Open code scanning alerts | ${CODE_ALERTS} |"
+            echo "| Open Dependabot alerts | ${DEPENDABOT_ALERTS} |"
+            echo "| Open secret scanning alerts | ${SECRET_ALERTS} |"
+            echo "| Releases | ${RELEASE_COUNT} |"
+            echo "| Tags | ${TAG_COUNT} |"
+            echo ""
+            echo "#### Endpoint status"
+            echo ""
+            echo "| Section | OK |"
+            echo "|---|---:|"
+            for file in "${OUT}"/*.json; do
+              base="$(basename "${file}" .json)"
+              if [[ "${base}" == "repo-audit" ]]; then
+                continue
+              fi
+              ok="$(jq -r '.ok' "${file}")"
+              echo "| ${base} | ${ok} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: repo-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/repo-audit.json
+          retention-days: 14
