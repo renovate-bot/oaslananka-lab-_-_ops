@@ -1,0 +1,231 @@
+name: Repo Release Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        type: string
+      apply:
+        description: Apply changes. False means dry-run.
+        required: true
+        default: false
+        type: boolean
+      approval:
+        description: Required when apply=true. Must equal APPLY_RELEASE.
+        required: false
+        default: ""
+        type: string
+      create_production_environment:
+        description: Create or update the production environment.
+        required: true
+        default: true
+        type: boolean
+      enable_immutable_releases:
+        description: Attempt to enable immutable releases.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-release-apply-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Apply release configuration
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          APPLY: ${{ inputs.apply }}
+          APPROVAL: ${{ inputs.approval }}
+          CREATE_PRODUCTION_ENVIRONMENT: ${{ inputs.create_production_environment }}
+          ENABLE_IMMUTABLE_RELEASES: ${{ inputs.enable_immutable_releases }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          ERR="${OUT}/errors"
+          mkdir -p "${RAW}" "${ERR}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/release-apply-${TARGET_OWNER}-${TARGET_REPO}.json"
+          : > "${STEPS}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          run_api_step() {
+            local name="$1"
+            local method="$2"
+            local endpoint="$3"
+            local input_file="${4:-}"
+
+            if [[ -n "${input_file}" ]]; then
+              if api --method "${method}" "${endpoint}" --input "${input_file}" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+                record "${name}" "applied" "${method} ${endpoint}"
+              else
+                record "${name}" "failed" "$(cat "${ERR}/${name}.err")"
+              fi
+            else
+              if api --method "${method}" "${endpoint}" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+                record "${name}" "applied" "${method} ${endpoint}"
+              else
+                record "${name}" "failed" "$(cat "${ERR}/${name}.err")"
+              fi
+            fi
+          }
+
+          content_capture() {
+            local name="$1"
+            local path="$2"
+            if api --method GET "repos/${REPO}/contents/${path}" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+              jq -r '.content // ""' "${RAW}/${name}.json" | base64 -d > "${RAW}/${name}.content" 2>/dev/null || true
+              record "${name}" "verified" "${path} exists"
+            else
+              : > "${RAW}/${name}.content"
+              record "${name}" "missing" "${path}: $(cat "${ERR}/${name}.err")"
+            fi
+          }
+
+          if [[ "${APPLY}" == "true" && "${APPROVAL}" != "APPLY_RELEASE" ]]; then
+            echo "approval must equal APPLY_RELEASE when apply=true" >&2
+            exit 1
+          fi
+
+          api --method GET "repos/${REPO}" > "${RAW}/repo.json"
+
+          if [[ "${CREATE_PRODUCTION_ENVIRONMENT}" == "true" ]]; then
+            jq -n '{
+              wait_timer: 0,
+              prevent_self_review: false,
+              reviewers: []
+            }' > "${OUT}/production-environment.json"
+
+            if [[ "${APPLY}" == "true" ]]; then
+              run_api_step "production_environment" "PUT" "repos/${REPO}/environments/production" "${OUT}/production-environment.json"
+            else
+              record "production_environment" "planned" "Would create/update production environment without approval gate."
+            fi
+          else
+            record "production_environment" "skipped" "create_production_environment=false"
+          fi
+
+          if [[ "${ENABLE_IMMUTABLE_RELEASES}" == "true" ]]; then
+            if [[ "${APPLY}" == "true" ]]; then
+              run_api_step "immutable_releases" "PUT" "repos/${REPO}/immutable-releases"
+            else
+              record "immutable_releases" "planned" "Would attempt PUT repos/${REPO}/immutable-releases."
+            fi
+          else
+            record "immutable_releases" "skipped" "enable_immutable_releases=false"
+          fi
+
+          content_capture "release_workflow" ".github/workflows/release.yml"
+          workflow_text="${RAW}/release_workflow.content"
+
+          has_contents_write="false"
+          has_attestations_write="false"
+          uses_actions_attest="false"
+          if grep -Eiq 'contents:[[:space:]]*write' "${workflow_text}"; then
+            has_contents_write="true"
+          fi
+          if grep -Eiq 'attestations:[[:space:]]*write' "${workflow_text}"; then
+            has_attestations_write="true"
+          fi
+          if grep -Eiq 'actions/attest' "${workflow_text}"; then
+            uses_actions_attest="true"
+          fi
+
+          record "release_workflow_contents_write" "${has_contents_write}" ".github/workflows/release.yml"
+          record "release_workflow_attestations_write" "${has_attestations_write}" ".github/workflows/release.yml"
+          record "release_workflow_actions_attest" "${uses_actions_attest}" ".github/workflows/release.yml"
+
+          api --method GET "repos/${REPO}/environments" -F per_page=100 > "${RAW}/environments-after.json" || true
+          api --method GET "repos/${REPO}/immutable-releases" > "${RAW}/immutable-releases-after.json" 2> "${ERR}/immutable-releases-after.err" || true
+
+          jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg target "${REPO}" \
+            --argjson apply "${APPLY}" \
+            --argjson create_production_environment "${CREATE_PRODUCTION_ENVIRONMENT}" \
+            --argjson enable_immutable_releases "${ENABLE_IMMUTABLE_RELEASES}" \
+            --argjson has_contents_write "${has_contents_write}" \
+            --argjson has_attestations_write "${has_attestations_write}" \
+            --argjson uses_actions_attest "${uses_actions_attest}" \
+            --slurpfile steps "${OUT}/steps.json" \
+            --slurpfile environments "${RAW}/environments-after.json" \
+            --rawfile immutable_error "${ERR}/immutable-releases-after.err" \
+            '{
+              generated_at: $generated_at,
+              target: $target,
+              apply: $apply,
+              requested: {
+                create_production_environment: $create_production_environment,
+                enable_immutable_releases: $enable_immutable_releases
+              },
+              verification: {
+                production_environment_present: (($environments[0].environments // []) | map(.name) | index("production") != null),
+                release_workflow_has_contents_write: $has_contents_write,
+                release_workflow_has_attestations_write: $has_attestations_write,
+                release_workflow_uses_actions_attest: $uses_actions_attest,
+                immutable_releases_error: (if $immutable_error == "" then null else $immutable_error end)
+              },
+              steps: $steps[0]
+            }' > "${REPORT}"
+
+          {
+            echo "### Repo Release Apply"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Apply | ${APPLY} |"
+            echo "| Production environment present | $(jq -r '.verification.production_environment_present' "${REPORT}") |"
+            echo "| Release workflow contents write | ${has_contents_write} |"
+            echo "| Release workflow attestations write | ${has_attestations_write} |"
+            echo "| Release workflow uses actions/attest | ${uses_actions_attest} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release apply report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-apply-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14
