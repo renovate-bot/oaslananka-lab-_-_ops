@@ -1,0 +1,278 @@
+name: Agent Fix Loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        type: string
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      max_iterations:
+        description: Maximum diagnostic iterations
+        required: true
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: agent-fix-loop-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  fix-loop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Run diagnostic fix loop
+        env:
+          TARGET_TOKEN: ${{ steps.app.outputs.token }}
+          OPS_TOKEN: ${{ github.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          mkdir -p "${OUT}/iterations"
+          ITERATION_LOG="${OUT}/agent-fix-loop-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}.ndjson"
+          REPORT="${OUT}/agent-fix-loop-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}.json"
+          : > "${ITERATION_LOG}"
+
+          target_api() {
+            GH_TOKEN="${TARGET_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_gh() {
+            GH_TOKEN="${OPS_TOKEN}" gh "$@"
+          }
+
+          classify_logs() {
+            local log_dir="$1"
+            local combined="${OUT}/combined-failed-logs.txt"
+            find "${log_dir}" -type f -name '*.log' -print0 2>/dev/null | xargs -0 cat > "${combined}" 2>/dev/null || true
+
+            if [[ ! -s "${combined}" ]]; then
+              echo "unknown"
+            elif grep -Eiq 'prettier|format:check|formatting|eslint|lint' "${combined}"; then
+              echo "format/lint"
+            elif grep -Eiq 'Invalid workflow file|YAMLException|workflow syntax|mapping values are not allowed|did not find expected' "${combined}"; then
+              echo "workflow syntax"
+            elif grep -Eiq 'Cannot find module|module not found|ERR_MODULE_NOT_FOUND|No such file or directory|command not found' "${combined}"; then
+              echo "missing dependency"
+            elif grep -Eiq 'AssertionError|FAIL|Test failed|failed tests|npm ERR! test|pnpm test' "${combined}"; then
+              echo "test failure"
+            else
+              echo "unknown"
+            fi
+          }
+
+          suggested_fix() {
+            local classification="$1"
+            case "${classification}" in
+              "format/lint")
+                printf '%s\n' \
+                  'Run the repository formatter/linter locally, commit only the resulting source changes, then push the same PR branch.' \
+                  '' \
+                  '```powershell' \
+                  'corepack enable' \
+                  'corepack pnpm install --frozen-lockfile' \
+                  'corepack pnpm run format' \
+                  'corepack pnpm run lint' \
+                  '```'
+                ;;
+              "workflow syntax")
+                printf '%s\n' \
+                  'Inspect the failed workflow YAML near the line reported in the log, fix the syntax, then run a local workflow linter before pushing.' \
+                  '' \
+                  '```powershell' \
+                  'actionlint .github/workflows/*.yml' \
+                  '```'
+                ;;
+              "missing dependency")
+                printf '%s\n' \
+                  'Install or restore the missing dependency using the repository package manager, commit the manifest and lockfile change together, then rerun checks.' \
+                  '' \
+                  '```powershell' \
+                  'corepack pnpm install --frozen-lockfile' \
+                  '```'
+                ;;
+              "test failure")
+                printf '%s\n' \
+                  'Reproduce the failing test locally, patch the smallest deterministic failure, and rerun the same test command before pushing.' \
+                  '' \
+                  '```powershell' \
+                  'corepack pnpm test' \
+                  '```'
+                ;;
+              *)
+                printf '%s\n' \
+                  'Open the diagnostics artifact and failed-run logs, identify the first deterministic current-head failure, and patch only that failure.'
+                ;;
+            esac
+          }
+
+          post_pr_comment() {
+            local body_file="$1"
+            target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${body_file}" >/dev/null
+          }
+
+          max_iterations="${MAX_ITERATIONS}"
+          if ! [[ "${max_iterations}" =~ ^[0-9]+$ ]]; then
+            max_iterations="3"
+          fi
+
+          for iteration in $(seq 1 "${max_iterations}"); do
+            started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+            ops_gh workflow run agent-pr-diagnostics.yml \
+              --repo "${OPS_REPO}" \
+              --ref main \
+              -f target_owner="${TARGET_OWNER}" \
+              -f target_repo="${TARGET_REPO}" \
+              -f pr_number="${PR_NUMBER}"
+
+            sleep 15
+
+            run_id="$(
+              ops_gh run list \
+                --repo "${OPS_REPO}" \
+                --workflow agent-pr-diagnostics.yml \
+                --json databaseId,createdAt,event,status \
+                --jq ".[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"${started_at}\") | .databaseId" \
+                --limit 20 |
+              head -n 1
+            )"
+
+            if [[ -z "${run_id}" ]]; then
+              echo "Could not locate diagnostics run" >&2
+              exit 1
+            fi
+
+            ops_gh run watch "${run_id}" --repo "${OPS_REPO}" --exit-status
+
+            iteration_dir="${OUT}/iterations/${iteration}"
+            mkdir -p "${iteration_dir}"
+            ops_gh run download "${run_id}" --repo "${OPS_REPO}" --dir "${iteration_dir}"
+
+            diagnostics_file="$(find "${iteration_dir}" -name diagnostics.json -print -quit)"
+            if [[ -z "${diagnostics_file}" ]]; then
+              echo "diagnostics.json not found in downloaded artifact" >&2
+              exit 1
+            fi
+
+            failing="$(jq -r '.check_summary.failing // 0' "${diagnostics_file}")"
+            pending="$(jq -r '.check_summary.pending // 0' "${diagnostics_file}")"
+            failed_runs="$(jq -r '.run_summary.failures // 0' "${diagnostics_file}")"
+            unresolved="$(jq -r '.unresolved_review_threads | length' "${diagnostics_file}")"
+            classification="$(classify_logs "${iteration_dir}")"
+
+            jq -n \
+              --arg iteration "${iteration}" \
+              --arg diagnostics_run_id "${run_id}" \
+              --arg diagnostics_run_url "https://github.com/${OPS_REPO}/actions/runs/${run_id}" \
+              --arg classification "${classification}" \
+              --argjson failing "${failing}" \
+              --argjson pending "${pending}" \
+              --argjson failed_runs "${failed_runs}" \
+              --argjson unresolved_review_threads "${unresolved}" \
+              '{
+                iteration: ($iteration|tonumber),
+                diagnostics_run_id: ($diagnostics_run_id|tonumber),
+                diagnostics_run_url: $diagnostics_run_url,
+                classification: $classification,
+                check_summary: {
+                  failing: $failing,
+                  pending: $pending
+                },
+                failed_runs: $failed_runs,
+                unresolved_review_threads: $unresolved_review_threads
+              }' >> "${ITERATION_LOG}"
+
+            if [[ "${failing}" -eq 0 && "${pending}" -eq 0 && "${failed_runs}" -eq 0 && "${unresolved}" -eq 0 ]]; then
+              jq -n '{body:"✅ PR is clean. Ready to merge."}' > "${OUT}/clean-comment.json"
+              post_pr_comment "${OUT}/clean-comment.json"
+              break
+            fi
+
+            suggestion="$(suggested_fix "${classification}")"
+            jq -n \
+              --arg classification "${classification}" \
+              --arg diagnostics_url "https://github.com/${OPS_REPO}/actions/runs/${run_id}" \
+              --arg suggestion "${suggestion}" \
+              '{
+                body: (
+                  "### Agent fix loop diagnostics\n\n" +
+                  "- Classification: `" + $classification + "`\n" +
+                  "- Diagnostics run: " + $diagnostics_url + "\n\n" +
+                  "Suggested next step:\n\n" + $suggestion + "\n\n" +
+                  "This workflow suggests fixes only. It does not push code directly."
+                )
+              }' > "${OUT}/suggestion-${iteration}.json"
+            post_pr_comment "${OUT}/suggestion-${iteration}.json"
+
+            if [[ "${iteration}" -lt "${max_iterations}" ]]; then
+              sleep 60
+            fi
+          done
+
+          jq -s '.' "${ITERATION_LOG}" > "${OUT}/iterations.json"
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg target "${REPO}" \
+            --arg pr_number "${PR_NUMBER}" \
+            --arg max_iterations "${max_iterations}" \
+            --slurpfile iterations "${OUT}/iterations.json" \
+            '{
+              generated_at: $generated_at,
+              target: $target,
+              pr_number: ($pr_number|tonumber),
+              max_iterations: ($max_iterations|tonumber),
+              iterations: $iterations[0]
+            }' > "${REPORT}"
+
+          {
+            echo "### Agent Fix Loop"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| PR | #${PR_NUMBER} |"
+            echo "| Iterations | $(jq -r 'length' "${OUT}/iterations.json") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fix-loop report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: agent-fix-loop-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+          path: out/
+          retention-days: 14
