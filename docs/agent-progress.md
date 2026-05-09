@@ -51,3 +51,25 @@ Applied:
 Skipped:
   - None.
 Next: Phase 4 — run the pipeline against oaslananka-lab/test.
+
+## Phase 4 — TEST on oaslananka-lab/test
+Completed: 2026-05-09T03:59:03Z
+Applied:
+  - Ran repo-onboarding.yml on oaslananka-lab/test: run 25590820051. AGENTS.md was created from docs/templates/AGENTS-org-repo.md.
+  - Ran repo-baseline-plan.yml: run 25590841469. Found main-unprotected, secret-scanning endpoint unavailable, Actions policy broad, and dependency graph SBOM unavailable.
+  - Ran repo-baseline-apply.yml: run 25590853506. Applied vulnerability alerts/security settings and the operational ruleset; deferred Actions policy enforcement as requested.
+  - Ran repo-release-plan.yml: run 25590866238. Reported missing production environment, release-please config, release manifest, and release workflow.
+  - Ran repo-release-apply.yml: run 25590878789. Created the production environment; immutable releases were skipped by input.
+  - Seeded missing oaslananka/test from oaslananka-lab/test so mirror and webhook tests could run against the requested personal source repo without changing the org mirror.
+  - Disabled Actions on oaslananka/test.
+  - Ran repo-mirror-sync.yml: first run 25590921006 exposed a relative artifact path bug; patched repo-mirror-sync.yml and reran successfully as run 25590946779 with sync_status=up_to_date.
+  - Added a repository webhook on oaslananka/test pointing to the Render receiver because GitHub App webhook configuration was blocked.
+  - Created oaslananka/test issue #1 for webhook e2e; Render received the webhook, inbox-handler.yml run 25590970097 completed, and oaslananka-repo-ops commented on the issue.
+  - Created temporary oaslananka-lab/test PR #4 with a deliberate syntax-error file and failing status context.
+  - Ran agent-fix-loop.yml: run 25591019097. It dispatched diagnostics runs 25591024247 and 25591052925 and posted fix suggestions on PR #4.
+  - Closed temporary PR #4 and deleted its branch.
+  - Ran final repo-audit.yml: run 25591072562. Active rules include deletion, non_fast_forward, and required_linear_history; production environment is present; Dependabot and secret scanning alerts are zero; AGENTS.md is present.
+Skipped:
+  - GitHub App-level webhook e2e because /app/hook/config returned 404 with a valid App JWT. Repository webhook e2e was used to exercise the same Render receiver and _ops dispatch path.
+  - Cloudflare DNS verification for webhook.oaslananka.dev because DNS write access is unavailable in the current Cloudflare MCP/Wrangler credentials.
+Next: Phase 5 — final documentation, push, smoke test, and NotebookLM handoff.
