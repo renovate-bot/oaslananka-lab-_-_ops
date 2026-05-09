@@ -171,3 +171,9 @@ async def webhook(request: Request) -> JSONResponse:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/")
+@app.head("/")
+async def root() -> dict[str, str]:
+    return {"status": "ok"}
