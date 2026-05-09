@@ -129,3 +129,13 @@ Skipped:
   - App-level webhook configuration because the GitHub App hook config API path still returns 404.
   - Render custom domain and Render WEBHOOK_SECRET update because the Render MCP reported no workspace selected and interactive workspace selection is not allowed in this task.
 Next: Add webhook.oaslananka.dev as a Render custom domain or keep App webhook delivery on the direct Render URL, then sync Render and GitHub App webhook secrets to the current Doppler WEBHOOK_SECRET and run one App-level webhook e2e test.
+
+## 2026-05-10 - Webhook E2E validation complete
+
+- Direct Render health returned 200 OK.
+- Custom domain `https://webhook.oaslananka.dev/health` returned 200 OK.
+- Created `oaslananka/test#4`.
+- `_ops` `inbox-handler.yml` run `25613399444` completed successfully.
+- `oaslananka-repo-ops[bot]` commented on the issue and classified it as `question`.
+
+Next controlled task: `agent-fix-loop v2` design document.

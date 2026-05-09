@@ -299,3 +299,45 @@ Explicit remaining manual items:
 ```
 
 
+
+---
+
+## 10. Update - App-level webhook E2E validated
+
+Generated: 2026-05-10
+
+Webhook health:
+
+```text
+https://ops-webhook-wi0r.onrender.com/health  -> 200 OK
+https://webhook.oaslananka.dev/health         -> 200 OK
+```
+
+E2E validation:
+
+```text
+Issue: https://github.com/oaslananka/test/issues/4
+Inbox run: https://github.com/oaslananka-lab/_ops/actions/runs/25613399444
+Result: success
+Bot comment: oaslananka-repo-ops[bot] received and classified the issue.
+```
+
+Current webhook status:
+
+```text
+Cloudflare DNS            OK
+Render custom domain      OK
+Webhook receiver health   OK
+Repository/App routing    OK for issue event dispatch
+inbox-handler.yml         OK
+```
+
+Remaining controlled work:
+
+```text
+agent-fix-loop v2:
+  design doc
+  implementation PR
+  test only on oaslananka-lab/test
+  no bulk rollout
+```
