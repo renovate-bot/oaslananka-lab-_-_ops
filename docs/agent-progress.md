@@ -38,3 +38,16 @@ Applied:
 Skipped:
   - Live workflow execution, because Phase 4 is the dedicated test pass against oaslananka-lab/test after onboarding templates are in place.
 Next: Phase 3 — add AGENTS.md templates and update repo-onboarding.yml.
+
+## Phase 3 — AGENTS.md templates and onboarding update
+Completed: 2026-05-09T03:44:34Z
+Applied:
+  - Created docs/templates/AGENTS-personal-repo.md for personal source repositories.
+  - Created docs/templates/AGENTS-org-repo.md for organization CI/CD mirrors.
+  - Added repo_role input to repo-onboarding.yml.
+  - Updated repo-onboarding.yml to checkout templates and write AGENTS.md through the GitHub contents API.
+  - Added unchanged-file handling so repeated onboarding runs do not fail on identical AGENTS.md content.
+  - Re-ran PyYAML parsing and actionlint across all workflows.
+Skipped:
+  - None.
+Next: Phase 4 — run the pipeline against oaslananka-lab/test.
