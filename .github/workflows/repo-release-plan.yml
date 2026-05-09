@@ -1,0 +1,198 @@
+name: Repo Release Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner or organization
+        required: true
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-release-plan-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Build release readiness plan
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          ERR="${OUT}/errors"
+          mkdir -p "${RAW}" "${ERR}"
+
+          api_capture() {
+            local name="$1"
+            local method="$2"
+            local endpoint="$3"
+            shift 3
+
+            if gh api --method "${method}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${endpoint}" "$@" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+              jq -n --arg endpoint "${endpoint}" --slurpfile data "${RAW}/${name}.json" \
+                '{ok:true,endpoint:$endpoint,data:$data[0]}' > "${OUT}/${name}.json"
+            else
+              jq -n --arg endpoint "${endpoint}" --arg error "$(cat "${ERR}/${name}.err")" \
+                '{ok:false,endpoint:$endpoint,error:$error}' > "${OUT}/${name}.json"
+            fi
+          }
+
+          content_capture() {
+            local name="$1"
+            local path="$2"
+            if gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "repos/${REPO}/contents/${path}" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+              jq -r '.content // ""' "${RAW}/${name}.json" | base64 -d > "${RAW}/${name}.content" 2>/dev/null || true
+              jq -n \
+                --arg path "${path}" \
+                --arg content "$(cat "${RAW}/${name}.content")" \
+                '{ok:true,path:$path,content:$content}' > "${OUT}/${name}.json"
+            else
+              jq -n --arg path "${path}" --arg error "$(cat "${ERR}/${name}.err")" \
+                '{ok:false,path:$path,error:$error,content:""}' > "${OUT}/${name}.json"
+            fi
+          }
+
+          api_capture repo GET "repos/${REPO}"
+          DEFAULT_BRANCH="$(jq -r '.data.default_branch // "main"' "${OUT}/repo.json")"
+
+          api_capture environments GET "repos/${REPO}/environments" -F per_page=100
+          api_capture workflows GET "repos/${REPO}/actions/workflows" -F per_page=100
+          api_capture workflow_token_permissions GET "repos/${REPO}/actions/permissions/workflow"
+          api_capture tags GET "repos/${REPO}/tags" -F per_page=100
+          api_capture latest_release GET "repos/${REPO}/releases/latest"
+          api_capture releases GET "repos/${REPO}/releases" -F per_page=10
+          api_capture immutable_releases GET "repos/${REPO}/immutable-releases"
+
+          content_capture release_please_config "release-please-config.json"
+          content_capture release_please_manifest ".release-please-manifest.json"
+          content_capture release_workflow ".github/workflows/release.yml"
+
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg target "${REPO}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            --slurpfile repo "${OUT}/repo.json" \
+            --slurpfile environments "${OUT}/environments.json" \
+            --slurpfile workflows "${OUT}/workflows.json" \
+            --slurpfile workflow_token_permissions "${OUT}/workflow_token_permissions.json" \
+            --slurpfile tags "${OUT}/tags.json" \
+            --slurpfile latest_release "${OUT}/latest_release.json" \
+            --slurpfile releases "${OUT}/releases.json" \
+            --slurpfile immutable_releases "${OUT}/immutable_releases.json" \
+            --slurpfile release_please_config "${OUT}/release_please_config.json" \
+            --slurpfile release_please_manifest "${OUT}/release_please_manifest.json" \
+            --slurpfile release_workflow "${OUT}/release_workflow.json" \
+            '
+            def arr_count($x):
+              if $x.ok and ($x.data | type) == "array" then ($x.data | length)
+              elif $x.ok and ($x.data.total_count? != null) then $x.data.total_count
+              else 0 end;
+
+            def has_env($name):
+              $environments[0].ok and (($environments[0].data.environments // []) | map(.name) | index($name) != null);
+
+            def has_release_workflow:
+              $release_workflow[0].ok or
+              ($workflows[0].ok and (($workflows[0].data.workflows // []) | map(.path) | index(".github/workflows/release.yml") != null));
+
+            def workflow_text: ($release_workflow[0].content // "");
+            def has_contents_write: (workflow_text | test("contents:[[:space:]]*write"; "i"));
+            def has_attestations_write: (workflow_text | test("attestations:[[:space:]]*write"; "i"));
+            def has_actions_attest: (workflow_text | test("actions/attest"; "i"));
+
+            {
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              observations: {
+                environments_count: (if $environments[0].ok then (($environments[0].data.environments // []) | length) else 0 end),
+                production_environment_present: has_env("production"),
+                release_please_config_present: $release_please_config[0].ok,
+                release_please_manifest_present: $release_please_manifest[0].ok,
+                release_workflow_present: has_release_workflow,
+                release_workflow_has_contents_write: has_contents_write,
+                release_workflow_has_attestations_write: has_attestations_write,
+                release_workflow_uses_actions_attest: has_actions_attest,
+                immutable_releases: {
+                  endpoint_ok: $immutable_releases[0].ok,
+                  enabled: (if $immutable_releases[0].ok then ($immutable_releases[0].data.enabled // false) else false end),
+                  enforced_by_owner: (if $immutable_releases[0].ok then ($immutable_releases[0].data.enforced_by_owner // false) else false end)
+                },
+                tag_count: arr_count($tags[0]),
+                latest_release: {
+                  endpoint_ok: $latest_release[0].ok,
+                  tag_name: (if $latest_release[0].ok then $latest_release[0].data.tag_name else null end),
+                  published_at: (if $latest_release[0].ok then $latest_release[0].data.published_at else null end)
+                },
+                release_count_sample: arr_count($releases[0]),
+                workflow_token_permissions: (if $workflow_token_permissions[0].ok then $workflow_token_permissions[0].data else null end)
+              }
+            }
+            | .issues = (
+              [
+                (if (.observations.production_environment_present | not) then "production environment is missing" else empty end),
+                (if (.observations.release_please_config_present | not) then "release-please-config.json is missing" else empty end),
+                (if (.observations.release_please_manifest_present | not) then ".release-please-manifest.json is missing" else empty end),
+                (if (.observations.release_workflow_present | not) then ".github/workflows/release.yml is missing" else empty end),
+                (if (.observations.release_workflow_present and (.observations.release_workflow_has_contents_write | not)) then "release workflow does not declare contents: write" else empty end),
+                (if (.observations.release_workflow_present and (.observations.release_workflow_has_attestations_write | not)) then "release workflow does not declare attestations: write" else empty end),
+                (if (.observations.release_workflow_present and (.observations.release_workflow_uses_actions_attest | not)) then "release workflow does not use actions/attest" else empty end)
+              ]
+            )
+            | .release_ready = ((.issues | length) == 0)
+            ' > "${OUT}/release-plan-${TARGET_OWNER}-${TARGET_REPO}.json"
+
+          {
+            echo "### Repo Release Plan"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Release ready | $(jq -r '.release_ready' "${OUT}/release-plan-${TARGET_OWNER}-${TARGET_REPO}.json") |"
+            echo "| Issues | $(jq -r '.issues | length' "${OUT}/release-plan-${TARGET_OWNER}-${TARGET_REPO}.json") |"
+            echo ""
+            echo "#### Issues"
+            jq -r '.issues[]? | "- " + .' "${OUT}/release-plan-${TARGET_OWNER}-${TARGET_REPO}.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release plan
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-plan-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/release-plan-${{ inputs.target_owner }}-${{ inputs.target_repo }}.json
+          retention-days: 14
