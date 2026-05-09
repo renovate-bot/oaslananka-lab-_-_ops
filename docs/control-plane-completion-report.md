@@ -143,3 +143,66 @@ Configure the external webhook routing manually:
    - Secret: the `WEBHOOK_SECRET` stored locally in `C:\Users\Admin\Desktop\_ops\.local\ops-webhook.env`
    - Events: `pull_request`, `push`, `issues`, `issue_comment`
 3. After that, create a personal test issue on `oaslananka/test` and verify `_ops` receives an `inbox-handler.yml` run through the App-level webhook.
+
+---
+
+## 8. Update — boardguard release readiness completed
+
+Generated: 2026-05-09
+
+Release apply:
+
+- Dry-run: https://github.com/oaslananka-lab/_ops/actions/runs/25608730806
+- Apply: https://github.com/oaslananka-lab/_ops/actions/runs/25608739096
+- Release plan refresh: https://github.com/oaslananka-lab/_ops/actions/runs/25608740482
+
+Result:
+
+```text
+production_environment_present          true
+release_workflow_has_contents_write     true
+release_workflow_has_attestations_write true
+release_workflow_uses_actions_attest    true
+release_ready                           true
+release_plan_issues                     0
+
+Post-release-readiness validation:
+
+Audit: https://github.com/oaslananka-lab/_ops/actions/runs/25608781481
+Onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25608782078
+Scorecard triage: https://github.com/oaslananka-lab/_ops/actions/runs/25608782627
+
+Boardguard status after this update:
+
+baseline security        OK
+operational ruleset      OK
+release readiness        OK
+production environment   OK
+release workflow attest  OK
+onboarding               OK
+audit                    OK
+triage                   OK
+
+Remaining items are deferred policy/model findings, not direct patch targets:
+
+Scorecard process/policy:
+- CI-Tests
+- SAST
+- CII-Best-Practices
+- Code-Review
+- Fuzzing
+- Maintained
+
+Ruleset/review-model:
+- Branch-Protection
+
+Next engineering task:
+
+agent-fix-loop v2:
+  real branch checkout
+  deterministic patch
+  no-GPG commit
+  push same PR branch
+  watch checks
+  repeat diagnostics
+
