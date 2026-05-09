@@ -91,8 +91,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          OUT="out"
-          WORK="work"
+          OUT="${GITHUB_WORKSPACE}/out"
+          WORK="${RUNNER_TEMP}/repo-mirror-sync"
           mkdir -p "${OUT}" "${WORK}"
 
           SOURCE_FULL="${SOURCE_OWNER}/${SOURCE_REPO}"
@@ -206,7 +206,7 @@ jobs:
             status="created"
           fi
 
-          jq -s '.' "${GITHUB_WORKSPACE}/${STEPS}" > "${GITHUB_WORKSPACE}/${OUT}/steps.json"
+          jq -s '.' "${STEPS}" > "${OUT}/steps.json"
           jq -n \
             --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
             --arg source "${SOURCE_FULL}" \
@@ -218,7 +218,7 @@ jobs:
             --arg target_sha_before "${target_sha_before}" \
             --arg target_sha_after "${target_sha_after}" \
             --argjson commits_synced "${commits_synced}" \
-            --slurpfile steps "${GITHUB_WORKSPACE}/${OUT}/steps.json" \
+            --slurpfile steps "${OUT}/steps.json" \
             '{
               generated_at: $generated_at,
               source: $source,
@@ -231,7 +231,7 @@ jobs:
               target_sha_before: (if $target_sha_before == "" then null else $target_sha_before end),
               target_sha_after: (if $target_sha_after == "" then null else $target_sha_after end),
               steps: $steps[0]
-            }' > "${GITHUB_WORKSPACE}/${REPORT}"
+            }' > "${REPORT}"
 
           {
             echo "### Repo Mirror Sync"
