@@ -1,0 +1,254 @@
+name: Repo Mirror Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_owner:
+        description: Personal source owner
+        required: true
+        default: oaslananka
+        type: string
+      source_repo:
+        description: Source repository name
+        required: true
+        type: string
+      target_owner:
+        description: Organization mirror owner
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        description: Target repository name
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - mirror_sync
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-mirror-sync-${{ inputs.source_owner || github.event.client_payload.source_owner }}-${{ inputs.source_repo || github.event.client_payload.source_repo }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Resolve inputs
+        id: resolved
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_OWNER="${{ inputs.source_owner || github.event.client_payload.source_owner || 'oaslananka' }}"
+          SOURCE_REPO="${{ inputs.source_repo || github.event.client_payload.source_repo }}"
+          TARGET_OWNER="${{ inputs.target_owner || github.event.client_payload.target_owner || 'oaslananka-lab' }}"
+          TARGET_REPO="${{ inputs.target_repo || github.event.client_payload.target_repo || github.event.client_payload.source_repo }}"
+
+          if [[ -z "${SOURCE_REPO}" || -z "${TARGET_REPO}" ]]; then
+            echo "source_repo and target_repo are required" >&2
+            exit 1
+          fi
+
+          {
+            echo "source_owner=${SOURCE_OWNER}"
+            echo "source_repo=${SOURCE_REPO}"
+            echo "target_owner=${TARGET_OWNER}"
+            echo "target_repo=${TARGET_REPO}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create source GitHub App token
+        id: source_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.resolved.outputs.source_owner }}
+          repositories: ${{ steps.resolved.outputs.source_repo }}
+
+      - name: Create target GitHub App token
+        id: target_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.resolved.outputs.target_owner }}
+
+      - name: Sync source repository to org mirror
+        env:
+          SOURCE_TOKEN: ${{ steps.source_app.outputs.token }}
+          TARGET_TOKEN: ${{ steps.target_app.outputs.token }}
+          SOURCE_OWNER: ${{ steps.resolved.outputs.source_owner }}
+          SOURCE_REPO: ${{ steps.resolved.outputs.source_repo }}
+          TARGET_OWNER: ${{ steps.resolved.outputs.target_owner }}
+          TARGET_REPO: ${{ steps.resolved.outputs.target_repo }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="out"
+          WORK="work"
+          mkdir -p "${OUT}" "${WORK}"
+
+          SOURCE_FULL="${SOURCE_OWNER}/${SOURCE_REPO}"
+          TARGET_FULL="${TARGET_OWNER}/${TARGET_REPO}"
+          REPORT="${OUT}/mirror-sync-${SOURCE_OWNER}-${SOURCE_REPO}.json"
+          STEPS="${OUT}/steps.ndjson"
+          : > "${STEPS}"
+
+          source_api() {
+            GH_TOKEN="${SOURCE_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          target_api() {
+            GH_TOKEN="${TARGET_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          status="failed"
+          created="false"
+          commits_synced="0"
+          source_sha=""
+          target_sha_before=""
+          target_sha_after=""
+
+          finish() {
+            local exit_code=$?
+            if [[ "${exit_code}" -ne 0 && ! -s "${REPORT}" ]]; then
+              jq -n \
+                --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+                --arg source "${SOURCE_FULL}" \
+                --arg target "${TARGET_FULL}" \
+                --arg sync_status "failed" \
+                --argjson commits_synced 0 \
+                --slurpfile steps "${STEPS}" \
+                '{generated_at:$generated_at,source:$source,target:$target,sync_status:$sync_status,commits_synced:$commits_synced,steps:$steps[0]}' \
+                > "${REPORT}"
+            fi
+            exit "${exit_code}"
+          }
+          trap finish EXIT
+
+          source_api --method GET "repos/${SOURCE_FULL}" > "${OUT}/source-repo.json"
+          default_branch="$(jq -r '.default_branch // "main"' "${OUT}/source-repo.json")"
+          description="$(jq -r '.description // ""' "${OUT}/source-repo.json")"
+          private="$(jq -r '.private // false' "${OUT}/source-repo.json")"
+
+          if target_api --method GET "repos/${TARGET_FULL}" > "${OUT}/target-repo-before.json" 2> "${OUT}/target-repo-before.err"; then
+            record "target_repo" "exists" "${TARGET_FULL}"
+          else
+            jq -n \
+              --arg name "${TARGET_REPO}" \
+              --arg description "${description}" \
+              --argjson private "${private}" \
+              '{name:$name,description:$description,private:$private,auto_init:false}' \
+              > "${OUT}/create-target.json"
+
+            target_api --method POST "orgs/${TARGET_OWNER}/repos" --input "${OUT}/create-target.json" \
+              > "${OUT}/target-repo-before.json"
+            created="true"
+            record "target_repo" "created" "${TARGET_FULL}"
+          fi
+
+          git config --global user.name "oaslananka-repo-ops"
+          git config --global user.email "repo-ops@oaslananka.dev"
+
+          source_url="https://x-access-token:${SOURCE_TOKEN}@github.com/${SOURCE_FULL}.git"
+          target_url="https://x-access-token:${TARGET_TOKEN}@github.com/${TARGET_FULL}.git"
+
+          git clone --no-tags "${source_url}" "${WORK}/source"
+          cd "${WORK}/source"
+          git fetch origin "${default_branch}" --tags
+          git remote add target "${target_url}"
+
+          source_sha="$(git rev-parse "origin/${default_branch}")"
+          target_sha_before="$(git ls-remote target "refs/heads/${default_branch}" | awk '{print $1}' || true)"
+
+          if [[ -z "${target_sha_before}" ]]; then
+            commits_synced="$(git rev-list --count "${source_sha}")"
+          elif [[ "${target_sha_before}" == "${source_sha}" ]]; then
+            commits_synced="0"
+          else
+            commits_synced="$(git rev-list --count "${source_sha}" "^${target_sha_before}" 2>/dev/null || git rev-list --count "${source_sha}")"
+          fi
+
+          if [[ "${target_sha_before}" == "${source_sha}" ]]; then
+            status="up_to_date"
+            record "default_branch" "up_to_date" "${default_branch}@${source_sha}"
+          else
+            git push --force-with-lease target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+            status="synced"
+            record "default_branch" "synced" "${default_branch}@${source_sha}"
+          fi
+
+          git push --tags target
+          record "tags" "synced" "Pushed source tags to target."
+
+          target_sha_after="$(git ls-remote target "refs/heads/${default_branch}" | awk '{print $1}' || true)"
+
+          if [[ "${created}" == "true" ]]; then
+            target_api --method PATCH "repos/${TARGET_FULL}" -f default_branch="${default_branch}" > "${OUT}/target-default-branch.json" || true
+            status="created"
+          fi
+
+          jq -s '.' "${GITHUB_WORKSPACE}/${STEPS}" > "${GITHUB_WORKSPACE}/${OUT}/steps.json"
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg source "${SOURCE_FULL}" \
+            --arg target "${TARGET_FULL}" \
+            --arg default_branch "${default_branch}" \
+            --arg sync_status "${status}" \
+            --argjson created "${created}" \
+            --arg source_sha "${source_sha}" \
+            --arg target_sha_before "${target_sha_before}" \
+            --arg target_sha_after "${target_sha_after}" \
+            --argjson commits_synced "${commits_synced}" \
+            --slurpfile steps "${GITHUB_WORKSPACE}/${OUT}/steps.json" \
+            '{
+              generated_at: $generated_at,
+              source: $source,
+              target: $target,
+              default_branch: $default_branch,
+              sync_status: $sync_status,
+              created: $created,
+              commits_synced: $commits_synced,
+              source_sha: $source_sha,
+              target_sha_before: (if $target_sha_before == "" then null else $target_sha_before end),
+              target_sha_after: (if $target_sha_after == "" then null else $target_sha_after end),
+              steps: $steps[0]
+            }' > "${GITHUB_WORKSPACE}/${REPORT}"
+
+          {
+            echo "### Repo Mirror Sync"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Source | ${SOURCE_FULL} |"
+            echo "| Target | ${TARGET_FULL} |"
+            echo "| Default branch | ${default_branch} |"
+            echo "| Status | ${status} |"
+            echo "| Commits synced | ${commits_synced} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mirror sync report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mirror-sync-${{ steps.resolved.outputs.source_owner }}-${{ steps.resolved.outputs.source_repo }}
+          path: out/
+          retention-days: 14
