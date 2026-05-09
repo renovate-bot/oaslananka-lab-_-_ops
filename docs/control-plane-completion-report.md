@@ -269,6 +269,7 @@ DNS and health status:
 webhook.oaslananka.dev resolves through Cloudflare proxied A/AAAA records
 https://ops-webhook-wi0r.onrender.com/health returns 200 OK
 https://webhook.oaslananka.dev/health returns 403 until Render accepts the custom host
+Current Doppler/local WEBHOOK_SECRET signed webhook returns 401 until Render WEBHOOK_SECRET is synced
 ```
 
 GitHub App webhook status:

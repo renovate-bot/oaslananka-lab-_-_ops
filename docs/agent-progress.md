@@ -123,6 +123,7 @@ Applied:
   - Verified webhook.oaslananka.dev resolves through Cloudflare proxied A/AAAA records.
   - Re-tested GitHub App hook config with a valid App JWT; GET /app/hook/config still returns 404.
   - Created oaslananka/test issue #2 as a repository-level webhook e2e test; inbox-handler.yml run 25612956358 completed successfully and the bot commented on the issue.
+  - Verified the current Doppler/local WEBHOOK_SECRET is not yet synced to Render because signed webhook verification with that value returns 401.
   - Updated docs/control-plane-completion-report.md, docs/architecture.md, and docs/doppler-integration.md with current Doppler, DNS, webhook, and remaining manual status.
 Skipped:
   - App-level webhook configuration because the GitHub App hook config API path still returns 404.

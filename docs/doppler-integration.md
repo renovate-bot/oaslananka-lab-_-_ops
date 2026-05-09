@@ -117,5 +117,6 @@ Current caveat:
 
 ```text
 Render MCP did not have a workspace selected in this session, so Render WEBHOOK_SECRET was not updated automatically.
+The current Doppler/local WEBHOOK_SECRET does not match the Render service env yet; a signed webhook request with the current local value returns 401.
 Before switching to App-level webhook delivery, sync Render WEBHOOK_SECRET and the GitHub App webhook secret to the same current Doppler WEBHOOK_SECRET value.
 ```
