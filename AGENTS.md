@@ -26,3 +26,37 @@ For repository operations, run workflows from:
 ```text
 oaslananka-lab/_ops
 ```
+
+## Architecture
+
+See docs/architecture.md for the full system model.
+
+Personal repos (oaslananka):
+  role: source of truth
+  actions: DISABLED — never attempt to trigger workflows here
+  agent writes: code commits only
+
+Org repos (oaslananka-lab):
+  role: CI/CD and release plane
+  actions: ENABLED
+  agent writes: workflow fixes only, never code changes
+
+Sync: personal → org (one-way). Never reverse.
+
+## Webhook events
+
+All GitHub events from personal repos are routed through:
+  https://webhook.oaslananka.dev
+  → oaslananka-lab/_ops workflow dispatch
+
+When working from a webhook-triggered context:
+  inputs.event_type tells you what happened
+  inputs.source_owner will be oaslananka (personal)
+  Always run diagnostics before patching
+
+## MCP tools available in Codex
+
+GitHub MCP    : full repo read/write, PR, issue, workflow dispatch
+Cloudflare MCP: DNS record management for oaslananka.dev
+Render MCP    : web service deploy/manage for webhook receiver
+gh CLI        : fallback for any GitHub operation
