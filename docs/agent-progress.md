@@ -25,3 +25,16 @@ Skipped:
   - GitHub App webhook update via REST because GET/PATCH /app/hook/config returned 404 with a valid App JWT; the app events already include pull_request, push, issues, and issue_comment.
   - Operator confirmation for GitHub App settings because this run is executing autonomously; exact values remain available in .local/ops-webhook.env and the Render URL is https://ops-webhook-wi0r.onrender.com/webhook?github=1.
 Next: Phase 2 — add missing _ops workflows.
+
+## Phase 2 — Missing _ops workflows
+Completed: 2026-05-09T03:42:43Z
+Applied:
+  - Created .github/workflows/repo-mirror-sync.yml for personal-to-org mirror synchronization and JSON artifacts.
+  - Created .github/workflows/inbox-handler.yml for issue/comment triage and /ops command dispatch.
+  - Created .github/workflows/agent-fix-loop.yml for diagnostic reruns and PR fix suggestions without direct code pushes.
+  - Created .github/workflows/repo-release-plan.yml for release readiness assessment.
+  - Created .github/workflows/repo-release-apply.yml for production environment setup and immutable release attempts.
+  - Validated workflow YAML with PyYAML and actionlint.
+Skipped:
+  - Live workflow execution, because Phase 4 is the dedicated test pass against oaslananka-lab/test after onboarding templates are in place.
+Next: Phase 3 — add AGENTS.md templates and update repo-onboarding.yml.
