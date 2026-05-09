@@ -20,6 +20,14 @@ on:
         options:
           - operational
           - strict-scorecard
+      repo_role:
+        description: Repository role for AGENTS.md template
+        required: true
+        default: org_mirror
+        type: choice
+        options:
+          - org_mirror
+          - personal_source
 
 permissions:
   contents: read
@@ -43,12 +51,18 @@ jobs:
           owner: ${{ inputs.target_owner }}
           repositories: ${{ inputs.target_repo }}
 
+      - name: Checkout control-plane templates
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
       - name: Build onboarding report
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           TARGET_OWNER: ${{ inputs.target_owner }}
           TARGET_REPO: ${{ inputs.target_repo }}
           DESIRED_RULESET_PROFILE: ${{ inputs.desired_ruleset_profile }}
+          REPO_ROLE: ${{ inputs.repo_role }}
           API_VERSION: "2026-03-10"
           APP_SLUG: ${{ steps.app.outputs.app-slug }}
           INSTALLATION_ID: ${{ steps.app.outputs.installation-id }}
@@ -206,6 +220,16 @@ jobs:
                 agent_pr_diagnostics_available: true,
                 open_prs_available_for_test: arr_count($open_prs[0]),
                 note: "Run agent-pr-diagnostics.yml against any open PR before patching."
+              },
+              repo_role: {
+                selected: env.REPO_ROLE,
+                agents_template: (
+                  if env.REPO_ROLE == "personal_source" then
+                    "docs/templates/AGENTS-personal-repo.md"
+                  else
+                    "docs/templates/AGENTS-org-repo.md"
+                  end
+                )
               }
             } as $base
             | $base
@@ -282,6 +306,7 @@ jobs:
             echo "| Default branch | ${DEFAULT_BRANCH} |"
             echo "| App slug | ${APP_SLUG} |"
             echo "| Installation ID | ${INSTALLATION_ID} |"
+            echo "| Repo role | ${REPO_ROLE} |"
             echo "| Issues | $(jq -r '.baseline_plan.issues | length' "${OUT}/onboarding-report.json") |"
             echo "| Recommendation | $(jq -r '.recommendation' "${OUT}/onboarding-report.json") |"
             echo ""
@@ -290,6 +315,84 @@ jobs:
             echo ""
             echo "#### Ruleset profile"
             jq -r '.ruleset_profile | to_entries[] | "- `\(.key)`: `\(.value)`"' "${OUT}/onboarding-report.json"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write AGENTS.md to target repository
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          REPO_ROLE: ${{ inputs.repo_role }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          mkdir -p "${OUT}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          if [[ "${REPO_ROLE}" == "personal_source" ]]; then
+            TEMPLATE="docs/templates/AGENTS-personal-repo.md"
+          else
+            TEMPLATE="docs/templates/AGENTS-org-repo.md"
+          fi
+
+          DEFAULT_BRANCH="$(api --method GET "repos/${REPO}" --jq .default_branch)"
+          CONTENT="$(sed "s/{REPO_NAME}/${TARGET_REPO}/g" "${TEMPLATE}")"
+          ENCODED_CONTENT="$(printf '%s' "${CONTENT}" | base64 -w0)"
+          if api --method GET "repos/${REPO}/contents/AGENTS.md" > "${OUT}/agents-existing.json" 2> "${OUT}/agents-existing.err"; then
+            EXISTING_SHA="$(jq -r '.sha' "${OUT}/agents-existing.json")"
+            jq -r '.content // ""' "${OUT}/agents-existing.json" | base64 -d > "${OUT}/agents-existing.md" 2>/dev/null || true
+          else
+            EXISTING_SHA=""
+            : > "${OUT}/agents-existing.md"
+          fi
+
+          if [[ -n "${EXISTING_SHA}" ]] && cmp -s "${OUT}/agents-existing.md" <(printf '%s' "${CONTENT}"); then
+            MUTATION="unchanged"
+            jq -n --arg message "AGENTS.md already matches ${TEMPLATE}" '{message:$message}' > "${OUT}/agents-write.json"
+          elif [[ -n "${EXISTING_SHA}" ]]; then
+            api --method PUT "repos/${REPO}/contents/AGENTS.md" \
+              -f message="ops: add AGENTS.md for agent operating contract" \
+              -f content="${ENCODED_CONTENT}" \
+              -f branch="${DEFAULT_BRANCH}" \
+              -f sha="${EXISTING_SHA}" \
+              > "${OUT}/agents-write.json"
+            MUTATION="updated"
+          else
+            api --method PUT "repos/${REPO}/contents/AGENTS.md" \
+              -f message="ops: add AGENTS.md for agent operating contract" \
+              -f content="${ENCODED_CONTENT}" \
+              -f branch="${DEFAULT_BRANCH}" \
+              > "${OUT}/agents-write.json"
+            MUTATION="created"
+          fi
+
+          jq -n \
+            --arg target "${REPO}" \
+            --arg template "${TEMPLATE}" \
+            --arg mutation "${MUTATION}" \
+            --arg default_branch "${DEFAULT_BRANCH}" \
+            '{target:$target,template:$template,mutation:$mutation,default_branch:$default_branch}' \
+            > "${OUT}/agents-write-summary.json"
+
+          {
+            echo ""
+            echo "#### AGENTS.md"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Template | ${TEMPLATE} |"
+            echo "| Mutation | ${MUTATION} |"
+            echo "| Branch | ${DEFAULT_BRANCH} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload onboarding report
