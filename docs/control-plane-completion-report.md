@@ -165,15 +165,35 @@ release_workflow_has_attestations_write true
 release_workflow_uses_actions_attest    true
 release_ready                           true
 release_plan_issues                     0
+```
 
 Post-release-readiness validation:
 
-Audit: https://github.com/oaslananka-lab/_ops/actions/runs/25608781481
-Onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25608782078
-Scorecard triage: https://github.com/oaslananka-lab/_ops/actions/runs/25608782627
+- Audit: https://github.com/oaslananka-lab/_ops/actions/runs/25608781481
+- Onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25608782078
+- Scorecard triage: https://github.com/oaslananka-lab/_ops/actions/runs/25608782627
+
+Final boardguard validation summary:
+
+```text
+Target                  oaslananka-lab/boardguard
+DefaultBranch           main
+ActiveBranchRules       3
+SecretScanningOK        True
+DependencyGraphSBOMOK   True
+OnboardingIssues        1
+ScorecardOpenAlerts     7
+ActionablePatchCount    0
+ProcessDeferredCount    6
+RulesetReviewModelCount 1
+ReleaseReady            True
+ReleaseIssues           0
+ProductionEnvironment   True
+```
 
 Boardguard status after this update:
 
+```text
 baseline security        OK
 operational ruleset      OK
 release readiness        OK
@@ -182,9 +202,11 @@ release workflow attest  OK
 onboarding               OK
 audit                    OK
 triage                   OK
+```
 
 Remaining items are deferred policy/model findings, not direct patch targets:
 
+```text
 Scorecard process/policy:
 - CI-Tests
 - SAST
@@ -195,9 +217,11 @@ Scorecard process/policy:
 
 Ruleset/review-model:
 - Branch-Protection
+```
 
 Next engineering task:
 
+```text
 agent-fix-loop v2:
   real branch checkout
   deterministic patch
@@ -205,4 +229,6 @@ agent-fix-loop v2:
   push same PR branch
   watch checks
   repeat diagnostics
+```
+
 
