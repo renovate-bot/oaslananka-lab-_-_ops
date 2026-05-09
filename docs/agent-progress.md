@@ -73,3 +73,18 @@ Skipped:
   - GitHub App-level webhook e2e because /app/hook/config returned 404 with a valid App JWT. Repository webhook e2e was used to exercise the same Render receiver and _ops dispatch path.
   - Cloudflare DNS verification for webhook.oaslananka.dev because DNS write access is unavailable in the current Cloudflare MCP/Wrangler credentials.
 Next: Phase 5 — final documentation, push, smoke test, and NotebookLM handoff.
+
+## Phase 5 — Final documentation and handoff
+Completed: 2026-05-09T04:11:49Z
+Applied:
+  - Updated README.md with the system architecture, workflow catalog, onboarding flow, PR handling flow, and webhook receiver details.
+  - Committed and pushed the _ops documentation, workflow, webhook receiver, and progress changes to main.
+  - Ran final repo-ops-cross-repo-smoke.yml against oaslananka-lab/test: run 25591126871 completed successfully.
+  - Authenticated NotebookLM through the nlm CLI using an isolated local profile store under .local/nlm because the default global NotebookLM profile directory was inaccessible.
+  - Created NotebookLM notebook b6fb16f0-b5fa-46c5-8fb5-bf26b3681014 titled "oaslananka-lab _ops system build - 2026-05-09".
+  - Added README.md, AGENTS.md, architecture/contract/progress/mirror/Doppler docs, AGENTS templates, webhook receiver code, and all current _ops workflow definitions as NotebookLM sources.
+  - Added a "System Build Handoff" note to the NotebookLM notebook with run IDs, final test state, and external limitations.
+Skipped:
+  - GitHub App-level webhook configuration remains manual because the App hook config endpoint returned 404 with a valid App JWT.
+  - webhook.oaslananka.dev DNS remains manual because the available Cloudflare MCP/Wrangler credentials were read-only for DNS records.
+Next: Operator can configure Cloudflare DNS and GitHub App webhook using the saved Render URL and WEBHOOK_SECRET in .local/ops-webhook.env, then switch the temporary oaslananka/test repository webhook to the App-level webhook path.
