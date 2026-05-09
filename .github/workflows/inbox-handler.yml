@@ -1,0 +1,308 @@
+name: Inbox Handler
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        description: Target owner
+        required: true
+        type: string
+      target_repo:
+        description: Target repository
+        required: true
+        type: string
+      issue_number:
+        description: Issue number
+        required: false
+        default: ""
+        type: string
+      pr_number:
+        description: Pull request number
+        required: false
+        default: ""
+        type: string
+      event_type:
+        description: Event type
+        required: true
+        default: issue
+        type: choice
+        options:
+          - issue
+          - pr
+          - comment
+  repository_dispatch:
+    types:
+      - inbox_event
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: inbox-handler-${{ inputs.target_owner || github.event.client_payload.target_owner }}-${{ inputs.target_repo || github.event.client_payload.target_repo }}-${{ inputs.issue_number || inputs.pr_number || github.event.client_payload.issue_number || github.event.client_payload.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  handle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Resolve inputs
+        id: resolved
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET_OWNER="${{ inputs.target_owner || github.event.client_payload.target_owner }}"
+          TARGET_REPO="${{ inputs.target_repo || github.event.client_payload.target_repo }}"
+          ISSUE_NUMBER="${{ inputs.issue_number || github.event.client_payload.issue_number }}"
+          PR_NUMBER="${{ inputs.pr_number || github.event.client_payload.pr_number }}"
+          EVENT_TYPE="${{ inputs.event_type || github.event.client_payload.event_type || 'issue' }}"
+
+          if [[ -z "${TARGET_OWNER}" || -z "${TARGET_REPO}" ]]; then
+            echo "target_owner and target_repo are required" >&2
+            exit 1
+          fi
+
+          if [[ -z "${ISSUE_NUMBER}" && -n "${PR_NUMBER}" ]]; then
+            ISSUE_NUMBER="${PR_NUMBER}"
+          fi
+
+          if [[ -z "${ISSUE_NUMBER}" ]]; then
+            echo "issue_number or pr_number is required" >&2
+            exit 1
+          fi
+
+          {
+            echo "target_owner=${TARGET_OWNER}"
+            echo "target_repo=${TARGET_REPO}"
+            echo "issue_number=${ISSUE_NUMBER}"
+            echo "pr_number=${PR_NUMBER}"
+            echo "event_type=${EVENT_TYPE}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.resolved.outputs.target_owner }}
+          repositories: ${{ steps.resolved.outputs.target_repo }}
+
+      - name: Handle inbox event
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          OPS_TOKEN: ${{ github.token }}
+          TARGET_OWNER: ${{ steps.resolved.outputs.target_owner }}
+          TARGET_REPO: ${{ steps.resolved.outputs.target_repo }}
+          ISSUE_NUMBER: ${{ steps.resolved.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.resolved.outputs.pr_number }}
+          EVENT_TYPE: ${{ steps.resolved.outputs.event_type }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          mkdir -p "${RAW}"
+          REPORT="${OUT}/inbox-${TARGET_OWNER}-${TARGET_REPO}-${ISSUE_NUMBER}.json"
+          STEPS="${OUT}/steps.ndjson"
+          : > "${STEPS}"
+
+          api() {
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_api() {
+            GH_TOKEN="${OPS_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+            if api --method GET "repos/${REPO}/labels/${name}" >/dev/null 2>&1; then
+              return 0
+            fi
+            api --method POST "repos/${REPO}/labels" \
+              -f name="${name}" \
+              -f color="${color}" \
+              -f description="${description}" >/dev/null
+          }
+
+          post_comment() {
+            local body_file="$1"
+            api --method POST "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
+              --input "${body_file}"
+          }
+
+          update_comment() {
+            local comment_id="$1"
+            local body_file="$2"
+            api --method PATCH "repos/${REPO}/issues/comments/${comment_id}" \
+              --input "${body_file}" >/dev/null
+          }
+
+          classify_issue() {
+            local text="$1"
+            local lower
+            lower="$(printf '%s' "${text}" | tr '[:upper:]' '[:lower:]')"
+            if grep -Eiq 'security|vulnerability|cve|secret|token|credential|exploit' <<< "${lower}"; then
+              echo "security"
+            elif grep -Eiq 'bug|broken|error|fail|failing|failure|exception|regression|crash' <<< "${lower}"; then
+              echo "bug"
+            elif grep -Eiq 'feature|enhancement|request|add|support|proposal' <<< "${lower}"; then
+              echo "feature"
+            else
+              echo "question"
+            fi
+          }
+
+          trigger_ops_workflow() {
+            local workflow="$1"
+            shift
+            GH_TOKEN="${OPS_TOKEN}" gh workflow run "${workflow}" \
+              --repo "${OPS_REPO}" \
+              --ref main \
+              "$@"
+          }
+
+          if [[ "${EVENT_TYPE}" == "comment" ]]; then
+            api --method GET "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" -F per_page=100 > "${RAW}/comments.json"
+            jq 'sort_by(.created_at) | last // {}' "${RAW}/comments.json" > "${RAW}/comment.json"
+            comment_body="$(jq -r '.body // ""' "${RAW}/comment.json")"
+
+            command="none"
+            action_result="ignored"
+
+            if grep -Eiq '/ops[[:space:]]+audit' <<< "${comment_body}"; then
+              trigger_ops_workflow repo-audit.yml \
+                -f target_owner="${TARGET_OWNER}" \
+                -f target_repo="${TARGET_REPO}"
+              command="audit"
+              action_result="triggered repo-audit.yml"
+            elif grep -Eiq '/ops[[:space:]]+baseline' <<< "${comment_body}"; then
+              trigger_ops_workflow repo-baseline-plan.yml \
+                -f target_owner="${TARGET_OWNER}" \
+                -f target_repo="${TARGET_REPO}"
+              command="baseline"
+              action_result="triggered repo-baseline-plan.yml"
+            elif grep -Eiq '/ops[[:space:]]+help' <<< "${comment_body}"; then
+              jq -n '{
+                body: "Available ops commands:\n\n- `/ops audit` - trigger repo-audit.yml\n- `/ops baseline` - trigger repo-baseline-plan.yml\n- `/ops help` - show this command list"
+              }' > "${OUT}/help-comment.json"
+              post_comment "${OUT}/help-comment.json" > "${RAW}/help-comment-response.json"
+              command="help"
+              action_result="posted help"
+            fi
+
+            record "comment_command" "${command}" "${action_result}"
+
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg target "${REPO}" \
+              --arg issue_number "${ISSUE_NUMBER}" \
+              --arg event_type "${EVENT_TYPE}" \
+              --arg command "${command}" \
+              --arg action_result "${action_result}" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{generated_at:$generated_at,target:$target,issue_number:($issue_number|tonumber),event_type:$event_type,command:$command,action_result:$action_result,steps:$steps[0]}' \
+              > "${REPORT}"
+          else
+            api --method GET "repos/${REPO}/issues/${ISSUE_NUMBER}" > "${RAW}/issue.json"
+            title="$(jq -r '.title // ""' "${RAW}/issue.json")"
+            body="$(jq -r '.body // ""' "${RAW}/issue.json")"
+            combined="${title}"$'\n'"${body}"
+
+            jq -n '{
+              body: "👋 This issue has been received by the ops automation system.\nAnalyzing..."
+            }' > "${OUT}/ack-comment.json"
+            post_comment "${OUT}/ack-comment.json" > "${RAW}/ack-comment-response.json"
+            ack_id="$(jq -r '.id' "${RAW}/ack-comment-response.json")"
+            record "acknowledgement" "posted" "comment_id=${ack_id}"
+
+            classification="$(classify_issue "${combined}")"
+            labels=()
+            notes=()
+
+            if [[ "${classification}" == "bug" ]] && grep -Eiq 'ci|cd|workflow|actions|repo ops|repo-ops|baseline|mirror|release|ruleset' <<< "${combined}"; then
+              ensure_label "ops-triage" "5319e7" "Issue is related to repository operations or CI/CD automation."
+              api --method POST "repos/${REPO}/issues/${ISSUE_NUMBER}/labels" -f labels[]="ops-triage" >/dev/null
+              labels+=("ops-triage")
+              notes+=("CI/CD or repo-ops signal detected.")
+            fi
+
+            if [[ "${classification}" == "security" ]]; then
+              ensure_label "security" "d73a4a" "Security-sensitive issue."
+              api --method POST "repos/${REPO}/issues/${ISSUE_NUMBER}/labels" -f labels[]="security" >/dev/null
+              labels+=("security")
+              notes+=("Security policy: https://github.com/${TARGET_OWNER}/${TARGET_REPO}/security/policy")
+            fi
+
+            if [[ "${#labels[@]}" -eq 0 ]]; then
+              labels_json="[]"
+            else
+              labels_json="$(printf '%s\n' "${labels[@]}" | jq -R . | jq -s .)"
+            fi
+            notes_text="$(printf '%s\n' "${notes[@]}" | sed '/^$/d' | sed 's/^/- /' || true)"
+            if [[ -z "${notes_text}" ]]; then
+              notes_text="- No automatic labels were required."
+            fi
+
+            jq -n \
+              --arg classification "${classification}" \
+              --arg notes "${notes_text}" \
+              '{
+                body: ("👋 This issue has been received by the ops automation system.\n\nClassification: `" + $classification + "`\n\n" + $notes)
+              }' > "${OUT}/classification-comment.json"
+            update_comment "${ack_id}" "${OUT}/classification-comment.json"
+            record "classification" "${classification}" "updated acknowledgement comment"
+
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg target "${REPO}" \
+              --arg issue_number "${ISSUE_NUMBER}" \
+              --arg event_type "${EVENT_TYPE}" \
+              --arg classification "${classification}" \
+              --argjson labels "${labels_json}" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{generated_at:$generated_at,target:$target,issue_number:($issue_number|tonumber),event_type:$event_type,classification:$classification,labels_applied:$labels,steps:$steps[0]}' \
+              > "${REPORT}"
+          fi
+
+          {
+            echo "### Inbox Handler"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Issue/PR | #${ISSUE_NUMBER} |"
+            echo "| Event type | ${EVENT_TYPE} |"
+            echo "| Report | $(basename "${REPORT}") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload inbox report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: inbox-${{ steps.resolved.outputs.target_owner }}-${{ steps.resolved.outputs.target_repo }}-${{ steps.resolved.outputs.issue_number }}
+          path: out/
+          retention-days: 14
