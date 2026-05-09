@@ -64,6 +64,28 @@ personal repository event
 
 The webhook receives events from personal repositories and routes them to the `_ops` control-plane.
 
+Current routing status:
+
+```text
+Cloudflare DNS record:
+  webhook.oaslananka.dev CNAME -> ops-webhook-wi0r.onrender.com
+  proxied: true
+
+Render direct health:
+  https://ops-webhook-wi0r.onrender.com/health -> 200 OK
+
+Custom domain health:
+  https://webhook.oaslananka.dev/health -> 403 until Render accepts webhook.oaslananka.dev as a custom host
+```
+
+Until the Render custom domain is added, GitHub webhook delivery should use the direct Render URL:
+
+```text
+https://ops-webhook-wi0r.onrender.com/webhook?github=1
+```
+
+Repository-level webhook delivery has been verified on `oaslananka/test`. App-level webhook setup remains manual because the GitHub App hook config API path returned `404` with a valid App JWT.
+
 ## Control-plane
 
 `oaslananka-lab/_ops` is the sole cross-repository automation authority.

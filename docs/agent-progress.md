@@ -109,3 +109,22 @@ Skipped:
   - Patching boardguard PR #14 because it was not part of the requested PR #7 completion scope and would require source-code work on an unrelated open PR.
   - Creating the boardguard production environment because this prompt requested release-plan verification, not release-apply or release behavior changes.
 Next: Manually configure Cloudflare DNS and the GitHub App webhook, then run one App-level webhook e2e issue test on oaslananka/test.
+
+## Webhook DNS and Doppler routing
+Completed: 2026-05-09T22:05:42Z
+Applied:
+  - Fixed the open Markdown fence in docs/control-plane-completion-report.md Section 8.
+  - Added doppler.yaml with project all and config main.
+  - Verified Doppler secret names for Cloudflare and webhook routing without intentionally printing secret values.
+  - Configured the local Doppler CLI scope non-interactively for project all and config main.
+  - Added scripts/configure-cloudflare-webhook.ps1 for idempotent Cloudflare CNAME upsert via Doppler-provided environment variables.
+  - Ran the Cloudflare DNS script under both explicit doppler run --project all --config main and local-scope doppler run -- forms; webhook.oaslananka.dev now points to ops-webhook-wi0r.onrender.com with proxied=true.
+  - Verified direct Render health at https://ops-webhook-wi0r.onrender.com/health returns 200 OK.
+  - Verified webhook.oaslananka.dev resolves through Cloudflare proxied A/AAAA records.
+  - Re-tested GitHub App hook config with a valid App JWT; GET /app/hook/config still returns 404.
+  - Created oaslananka/test issue #2 as a repository-level webhook e2e test; inbox-handler.yml run 25612956358 completed successfully and the bot commented on the issue.
+  - Updated docs/control-plane-completion-report.md, docs/architecture.md, and docs/doppler-integration.md with current Doppler, DNS, webhook, and remaining manual status.
+Skipped:
+  - App-level webhook configuration because the GitHub App hook config API path still returns 404.
+  - Render custom domain and Render WEBHOOK_SECRET update because the Render MCP reported no workspace selected and interactive workspace selection is not allowed in this task.
+Next: Add webhook.oaslananka.dev as a Render custom domain or keep App webhook delivery on the direct Render URL, then sync Render and GitHub App webhook secrets to the current Doppler WEBHOOK_SECRET and run one App-level webhook e2e test.

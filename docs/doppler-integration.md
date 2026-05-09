@@ -63,3 +63,59 @@ REPO_OPS_APP_PRIVATE_KEY
 `REPO_OPS_APP_PRIVATE_KEY` is stored in `oaslananka-lab/_ops` as a repository-level Actions secret.
 
 `REPO_OPS_APP_CLIENT_ID` is stored in `oaslananka-lab/_ops` as a repository-level Actions variable.
+
+## Local project configuration
+
+The `_ops` checkout includes `doppler.yaml` with this setup:
+
+```yaml
+setup:
+  - project: all
+    config: main
+```
+
+When running non-interactive automation, pass the project and config explicitly:
+
+```powershell
+doppler run --project all --config main -- <command>
+```
+
+The local checkout scope has also been configured non-interactively with:
+
+```powershell
+doppler setup --project all --config main --no-interactive
+```
+
+After that setup, the shorter form also works from the `_ops` root:
+
+```powershell
+doppler run -- <command>
+```
+
+## Cloudflare and webhook routing secrets
+
+The Doppler `all/main` config currently exposes these relevant secret names:
+
+```text
+CLOUDFLARE_GLOBAL_API_KEY
+CLOUDFLARE_GLABAL_MAIL
+WEBHOOK_SECRET
+```
+
+`CLOUDFLARE_GLABAL_MAIL` is intentionally treated as a Cloudflare email alias by `_ops` automation because that is the name currently present in Doppler.
+
+`WEBHOOK_SECRET` exists in Doppler and is the value that should be synchronized to:
+
+```text
+Render service env: WEBHOOK_SECRET
+GitHub App webhook secret
+```
+
+Do not print the value during rotation or verification. Use standard input and suppress command output when setting the value.
+
+Current caveat:
+
+```text
+Render MCP did not have a workspace selected in this session, so Render WEBHOOK_SECRET was not updated automatically.
+Before switching to App-level webhook delivery, sync Render WEBHOOK_SECRET and the GitHub App webhook secret to the same current Doppler WEBHOOK_SECRET value.
+```

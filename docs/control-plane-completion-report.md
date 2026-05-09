@@ -130,19 +130,19 @@ Open PRs observed but not modified:
 - No GitHub App private key was copied into any target repository.
 - No repo-local App secret exists in `oaslananka-lab/boardguard`; repo secrets count is `0`.
 - No GPG signing flow was used; local git config has `commit.gpgsign=false` and `tag.gpgSign=false`.
-- Cloudflare DNS record `webhook.oaslananka.dev` was not created because the available Cloudflare credentials exposed DNS read, not write.
-- GitHub App-level webhook was not updated by API because the App hook config endpoint returned 404 with a valid App JWT; repository-level webhook e2e was previously verified on `oaslananka/test`.
+- GitHub App-level webhook was not updated by API because the App hook config endpoint returned 404 with a valid App JWT; repository-level webhook e2e was verified on `oaslananka/test`.
 
 ## 7. Next required step
 
-Configure the external webhook routing manually:
+Complete the remaining external webhook routing:
 
-1. In Cloudflare, create `webhook.oaslananka.dev` as a proxied CNAME to the Render service host.
-2. In the GitHub App settings for `oaslananka-repo-ops`, set:
+1. In Render, add `webhook.oaslananka.dev` as a custom domain for the `ops-webhook` service or keep the GitHub App webhook on the direct Render URL.
+2. Sync the current Doppler `WEBHOOK_SECRET` value to the Render `WEBHOOK_SECRET` env var and the GitHub App webhook secret at the same time.
+3. In the GitHub App settings for `oaslananka-repo-ops`, set:
    - URL: `https://ops-webhook-wi0r.onrender.com/webhook?github=1`
-   - Secret: the `WEBHOOK_SECRET` stored locally in `C:\Users\Admin\Desktop\_ops\.local\ops-webhook.env`
+   - Secret: the current `WEBHOOK_SECRET` stored in Doppler `all/main`
    - Events: `pull_request`, `push`, `issues`, `issue_comment`
-3. After that, create a personal test issue on `oaslananka/test` and verify `_ops` receives an `inbox-handler.yml` run through the App-level webhook.
+4. After that, create a personal test issue on `oaslananka/test` and verify `_ops` receives an `inbox-handler.yml` run through the App-level webhook.
 
 ---
 
@@ -229,6 +229,72 @@ agent-fix-loop v2:
   push same PR branch
   watch checks
   repeat diagnostics
+```
+
+---
+
+## 9. Update — Doppler and webhook DNS routing
+
+Generated: 2026-05-10
+
+Doppler local project/config:
+
+```text
+project all
+config  main
+```
+
+Doppler secret-name verification:
+
+```text
+CLOUDFLARE_GLOBAL_API_KEY present
+CLOUDFLARE_GLABAL_MAIL    present and mapped as Cloudflare email alias
+WEBHOOK_SECRET            present
+```
+
+Cloudflare DNS automation:
+
+- Script: `scripts/configure-cloudflare-webhook.ps1`
+- Command path: `doppler run --project all --config main -- powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-cloudflare-webhook.ps1`
+- Local-scope command path verified after `doppler setup --project all --config main --no-interactive`: `doppler run -- powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-cloudflare-webhook.ps1`
+- Record: `webhook.oaslananka.dev`
+- Type: `CNAME`
+- Target: `ops-webhook-wi0r.onrender.com`
+- Proxied: `true`
+- Last script action: `unchanged` after a successful `updated` run
+
+DNS and health status:
+
+```text
+webhook.oaslananka.dev resolves through Cloudflare proxied A/AAAA records
+https://ops-webhook-wi0r.onrender.com/health returns 200 OK
+https://webhook.oaslananka.dev/health returns 403 until Render accepts the custom host
+```
+
+GitHub App webhook status:
+
+```text
+GitHub App slug             oaslananka-repo-ops
+GitHub App ID               3649470
+GET /app/hook/config        404
+App-level webhook automated update unavailable through current API path
+```
+
+Webhook E2E validation:
+
+- Mode: repository-level webhook, not App-level webhook
+- Issue: https://github.com/oaslananka/test/issues/2
+- `_ops` run: https://github.com/oaslananka-lab/_ops/actions/runs/25612956358
+- Result: `inbox-handler.yml` completed successfully and `oaslananka-repo-ops` commented on the issue.
+
+Explicit remaining manual items:
+
+```text
+1. Add webhook.oaslananka.dev as a Render custom domain, or keep App webhook URL on the direct Render URL.
+2. Sync the current Doppler WEBHOOK_SECRET to Render WEBHOOK_SECRET.
+3. Set the GitHub App webhook secret to the same current Doppler WEBHOOK_SECRET.
+4. Configure GitHub App webhook events: pull_request, push, issues, issue_comment.
+5. Run one App-level webhook E2E issue test on oaslananka/test.
 ```
 
 
