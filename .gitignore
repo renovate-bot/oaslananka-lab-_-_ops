@@ -1,5 +1,7 @@
 audit-artifacts/
+release-artifacts/
 plans/
+plan-artifacts/
 apply-artifacts/
 agent-diagnostics/
 onboarding-artifacts/

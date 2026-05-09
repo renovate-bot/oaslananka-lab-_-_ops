@@ -88,3 +88,24 @@ Skipped:
   - GitHub App-level webhook configuration remains manual because the App hook config endpoint returned 404 with a valid App JWT.
   - webhook.oaslananka.dev DNS remains manual because the available Cloudflare MCP/Wrangler credentials were read-only for DNS records.
 Next: Operator can configure Cloudflare DNS and GitHub App webhook using the saved Render URL and WEBHOOK_SECRET in .local/ops-webhook.env, then switch the temporary oaslananka/test repository webhook to the App-level webhook path.
+
+## Completion Verification — boardguard/test pilot set
+Completed: 2026-05-09T08:19:01Z
+Applied:
+  - Re-confirmed _ops is on main and up to date with origin/main.
+  - Re-confirmed boardguard PR #7 is merged and synchronized local boardguard main with origin/main.
+  - Re-confirmed every required _ops document, workflow, and webhook service file exists.
+  - Parsed every _ops workflow YAML file successfully with PyYAML.
+  - Re-confirmed _ops GitHub App variable REPO_OPS_APP_CLIENT_ID and secret REPO_OPS_APP_PRIVATE_KEY exist.
+  - Ran cross-repo smoke against oaslananka-lab/test: run 25596187654 succeeded.
+  - Ran boardguard repo audit: run 25596202222 succeeded with 3 active branch rules, secret scanning OK, SBOM OK, 7 open code scanning alerts, and selected actions OK.
+  - Ran boardguard onboarding: run 25596214874 succeeded with only code-scanning-open-alerts remaining.
+  - Ran boardguard Scorecard triage: run 25596230060 succeeded with 0 actionable patch findings, 6 process/policy deferred findings, and 1 ruleset/review-model finding.
+  - Ran boardguard release plan: run 25596242502 succeeded; release workflow/config/manifest/attestation checks are present, with production environment still missing.
+  - Verified webhook health returns 200 OK.
+  - Verified boardguard has no repo-local secrets and therefore no repo-local App private key.
+  - Wrote docs/control-plane-completion-report.md with run URLs, artifact paths, PR URLs, deferred findings, explicit non-actions, and the next required step.
+Skipped:
+  - Patching boardguard PR #14 because it was not part of the requested PR #7 completion scope and would require source-code work on an unrelated open PR.
+  - Creating the boardguard production environment because this prompt requested release-plan verification, not release-apply or release behavior changes.
+Next: Manually configure Cloudflare DNS and the GitHub App webhook, then run one App-level webhook e2e issue test on oaslananka/test.
