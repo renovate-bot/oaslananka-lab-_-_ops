@@ -634,12 +634,13 @@ Control-plane changes:
 
 ```text
 gh-aw pr-fix        compiled and dry-run validated
-gh-aw issue-triage  compiled
-gh-aw ci-doctor     compiled
+gh-aw issue-triage  compiled, dispatch-only
+gh-aw ci-doctor     compiled, dispatch-only
 check_run routing   agent-fix-loop.yml by default
 /ops fix            agent-fix-loop.yml patch mode
 comment rendering   escaped newline/tab sequences normalized before posting
 mirror-sync         fast-forward first, force-with-lease only for divergence
+webhook guard       oaslananka-lab/_ops ignored to prevent control-plane feedback loops
 ```
 
 Runtime constraint:

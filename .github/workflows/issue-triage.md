@@ -1,9 +1,17 @@
 ---
 name: Issue Triage
 on:
-  issues:
-    types:
-      - opened
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
 permissions:
   issues: read
 engine: copilot
@@ -30,6 +38,13 @@ safe-outputs:
 # Issue Triage Agent
 
 Classify the new issue and take the appropriate action.
+
+## Dispatch Inputs
+
+- Target repository: `{{inputs.target_owner}}/{{inputs.target_repo}}`
+- Issue number: `{{inputs.issue_number}}`
+
+This workflow is dispatch-only until the `_ops` repository has a valid `COPILOT_GITHUB_TOKEN` secret for gh-aw runtime execution. Production issue webhooks continue to use `inbox-handler.yml`.
 
 ## Classification Rules
 

@@ -20,6 +20,11 @@ OPS_REPO = os.getenv("OPS_REPO", "oaslananka-lab/_ops")
 PERSONAL_OWNER = os.getenv("PERSONAL_OWNER", "oaslananka")
 ORG_OWNER = os.getenv("ORG_OWNER", "oaslananka-lab")
 ROUTED_OWNERS = {PERSONAL_OWNER, ORG_OWNER}
+IGNORED_ORG_REPOS = {
+    repo.strip()
+    for repo in os.getenv("IGNORED_ORG_REPOS", "_ops").split(",")
+    if repo.strip()
+}
 API_VERSION = os.getenv("GITHUB_API_VERSION", "2026-03-10")
 CHECK_RUN_WORKFLOW = os.getenv("CHECK_RUN_WORKFLOW", "agent-fix-loop.yml")
 
@@ -91,6 +96,9 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     if owner not in ROUTED_OWNERS:
         return {"handled": False, "reason": "owner not routed", "owner": owner}
+
+    if owner == ORG_OWNER and repo in IGNORED_ORG_REPOS:
+        return {"handled": False, "reason": "org repo ignored", "owner": owner, "repo": repo}
 
     action = payload.get("action") or ""
 

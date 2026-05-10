@@ -51,7 +51,9 @@ The repository also carries compiled GitHub Agentic Workflows:
 | `issue-triage` | Compiled for concise issue classification and labeling. |
 | `ci-doctor` | Compiled for failed CI diagnosis. Runtime use is gated until `_ops` has a valid `COPILOT_GITHUB_TOKEN` secret. |
 
-Automatic webhook routing currently stays on `agent-fix-loop.yml` by default because that deterministic workflow runs with the existing GitHub App credentials. Set `CHECK_RUN_WORKFLOW=ci-doctor.lock.yml` on the webhook runtime only after the gh-aw Copilot engine secret is configured.
+The gh-aw workflows are dispatch-only until the Copilot engine secret is configured. Automatic webhook routing currently stays on `agent-fix-loop.yml` by default because that deterministic workflow runs with the existing GitHub App credentials. Set `CHECK_RUN_WORKFLOW=ci-doctor.lock.yml` on the webhook runtime only after the gh-aw Copilot engine secret is configured and the `ci-doctor` lock workflow is intentionally recompiled with event triggers.
+
+The webhook ignores `_ops` repository events by default to avoid recursive control-plane repair loops.
 
 ## Onboard a Repository
 

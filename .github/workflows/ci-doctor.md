@@ -12,18 +12,6 @@ on:
       pr_number:
         required: false
         type: string
-  check_run:
-    types:
-      - completed
-  workflow_run:
-    workflows:
-      - CI
-      - Security
-      - CodeQL
-    types:
-      - completed
-    branches:
-      - main
 permissions:
   issues: read
   pull-requests: read
@@ -51,7 +39,9 @@ When a CI workflow fails, diagnose the root cause and post a structured report.
 - Target repository: `{{inputs.target_owner}}/{{inputs.target_repo}}`
 - PR number: `{{inputs.pr_number}}`
 
-When invoked through `workflow_dispatch`, use these inputs to inspect the target repository and associated PR. When invoked directly by `check_run` or `workflow_run`, derive the repository and PR from the event payload.
+Use these inputs to inspect the target repository and associated PR.
+
+This workflow is dispatch-only until the `_ops` repository has a valid `COPILOT_GITHUB_TOKEN` secret for gh-aw runtime execution. Production failed-check routing continues to use `agent-fix-loop.yml` through the webhook service.
 
 ## On Failure
 

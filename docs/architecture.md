@@ -165,13 +165,15 @@ ci-doctor     failed CI diagnosis and optional PR fix dispatch
 
 These workflows are compiled and dry-run validated, but the Copilot engine requires a `_ops` repository secret named `COPILOT_GITHUB_TOKEN`.
 
-Until that secret exists, production webhook routing uses `agent-fix-loop.yml` for failed `check_run` events. The webhook service can opt into gh-aw later by setting:
+Until that secret exists, the gh-aw lock workflows are dispatch-only and production webhook routing uses `agent-fix-loop.yml` for failed `check_run` events. The webhook service can opt into gh-aw later by setting:
 
 ```text
 CHECK_RUN_WORKFLOW=ci-doctor.lock.yml
 ```
 
 This keeps automatic check-run handling green while preserving gh-aw as the next engine-backed automation layer.
+
+The webhook ignores `_ops` repository events by default through `IGNORED_ORG_REPOS=_ops`. This prevents failed control-plane automation checks from recursively dispatching more control-plane repair workflows.
 
 ## Control-plane
 
