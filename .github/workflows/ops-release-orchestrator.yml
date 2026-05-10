@@ -189,6 +189,26 @@ jobs:
             ops_gh run watch "$1" --repo "${OPS_REPO}" --exit-status
           }
 
+          find_existing_release_run() {
+            target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 25 \
+              --json databaseId,event,status,conclusion,headSha,createdAt,url > "${RAW}/release-workflow-runs.json" || return 0
+            if [[ -n "${MERGE_COMMIT_SHA}" ]]; then
+              jq -r --arg sha "${MERGE_COMMIT_SHA}" '
+                map(select(.headSha == $sha)) | first.databaseId // empty
+              ' "${RAW}/release-workflow-runs.json"
+            else
+              jq -r '
+                map(select(.event == "push")) | first.databaseId // empty
+              ' "${RAW}/release-workflow-runs.json"
+            fi
+          }
+
+          watch_release_run() {
+            local run_id="$1"
+            [[ -n "${run_id}" ]] || return 1
+            target_gh run watch "${run_id}" --repo "${REPO}" --exit-status
+          }
+
           node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
           node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
           record "policy" "loaded" "${REPO}"
@@ -231,16 +251,26 @@ jobs:
                 record "release_workflow" "dry_run" "${release_workflow}"
               else
                 before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-                target_gh workflow run "${release_workflow}" --repo "${REPO}" --ref main || {
-                  final_state="release_workflow_failed"
-                  record "release_workflow" "dispatch_failed" "${release_workflow}"
-                  exit 0
-                }
+                if ! target_gh workflow run "${release_workflow}" --repo "${REPO}" --ref main 2> "${RAW}/release-workflow-dispatch.err"; then
+                  release_workflow_run_id="$(find_existing_release_run)"
+                  if [[ -z "${release_workflow_run_id}" ]]; then
+                    final_state="release_workflow_failed"
+                    record "release_workflow" "dispatch_failed" "${release_workflow}"
+                    exit 0
+                  fi
+                  if ! watch_release_run "${release_workflow_run_id}"; then
+                    final_state="release_workflow_failed"
+                    record "release_workflow" "observed_push_run_failed" "run_id=${release_workflow_run_id}"
+                    exit 0
+                  fi
+                  final_state="release_workflow_dispatched"
+                  record "release_workflow" "observed_push_run_success" "${release_workflow} run_id=${release_workflow_run_id}"
+                else
                 sleep 8
                 release_workflow_run_id="$(target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 10 --json databaseId,createdAt |
                   jq -r --arg before "${before}" 'map(select(.createdAt >= $before)) | first.databaseId // .[0].databaseId // empty')"
                 if [[ -n "${release_workflow_run_id}" ]]; then
-                  target_gh run watch "${release_workflow_run_id}" --repo "${REPO}" --exit-status || {
+                  watch_release_run "${release_workflow_run_id}" || {
                     final_state="release_workflow_failed"
                     record "release_workflow" "failed" "run_id=${release_workflow_run_id}"
                     exit 0
@@ -248,6 +278,7 @@ jobs:
                 fi
                 final_state="release_workflow_dispatched"
                 record "release_workflow" "success" "${release_workflow} run_id=${release_workflow_run_id}"
+                fi
               fi
 
               target_gh pr list --repo "${REPO}" --state open --json number,title,headRefName,author \
