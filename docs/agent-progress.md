@@ -320,7 +320,7 @@ Next: Add a proper `COPILOT_GITHUB_TOKEN` secret for gh-aw runtime, intentionall
 
 ## 2026-05-10 - policy-controlled lifecycle autonomy implementation
 
-Completed: pending remote validation
+Completed: 2026-05-10T13:55:00+03:00
 
 Applied:
   - Added repository autonomy policy files under `config/`.
@@ -331,8 +331,38 @@ Applied:
   - Updated `agent-fix-loop.yml` so clean diagnostics dispatch `ops-pr-finalize.yml` when policy permits.
   - Expanded `inbox-handler.yml` with `/ops finalize`, `/ops merge`, `/ops auto-merge`, `/ops release`, `/ops publish`, `/ops release-publish`, `/ops pause`, `/ops resume`, `/ops policy`, and `/ops help`.
   - Updated webhook routing so failed `check_run` events resolve repo policy and choose patch/suggest mode without Copilot.
+  - Fixed ruleset autonomy audit handling so disabled repository auto-merge is not a blocker when policy permits immediate merge.
+  - Fixed release orchestration for push-triggered and dispatch-only release workflows, including publish-disabled protected-environment gates.
+  - Merged `oaslananka-lab/boardguard#17` through `ops-pr-finalize.yml` using expected head SHA protection.
+  - Verified `oaslananka-lab/kicad-studio#38` was already merged and completed post-merge audit, release-plan, and release orchestration.
+
+Validation:
+  - Policy tests: `node --test tests/ops-policy.test.mjs` passed.
+  - Workflow syntax: YAML parse and `actionlint` passed for edited workflows.
+  - Webhook syntax: `python -m py_compile services/ops_webhook/app.py` passed.
+  - Ruleset autonomy audit, test: https://github.com/oaslananka-lab/_ops/actions/runs/25625819697
+  - Ruleset autonomy audit, kicad-studio: https://github.com/oaslananka-lab/_ops/actions/runs/25625828733
+  - Ruleset autonomy audit, boardguard: https://github.com/oaslananka-lab/_ops/actions/runs/25625843223
+  - Boardguard finalize dry-run: https://github.com/oaslananka-lab/_ops/actions/runs/25625719334
+  - Boardguard finalize/merge: https://github.com/oaslananka-lab/_ops/actions/runs/25625866193
+  - Boardguard post-merge audit: https://github.com/oaslananka-lab/_ops/actions/runs/25625882745
+  - Boardguard post-merge release-plan: https://github.com/oaslananka-lab/_ops/actions/runs/25625889020
+  - Boardguard release orchestration: https://github.com/oaslananka-lab/_ops/actions/runs/25625956714
+  - Kicad post-merge audit: https://github.com/oaslananka-lab/_ops/actions/runs/25625975797
+  - Kicad post-merge release-plan: https://github.com/oaslananka-lab/_ops/actions/runs/25625982516
+  - Kicad release orchestration: https://github.com/oaslananka-lab/_ops/actions/runs/25626628738
+
+Final PR states:
+  - `oaslananka-lab/kicad-studio#38`: merged, merge commit `693f4be68330593fe3c05903c5d8edcf37491745`.
+  - `oaslananka-lab/boardguard#17`: merged, merge commit `44170c0fc24f8712d43d47c900ea1087f7ed60fc`.
+
+Release/publish states:
+  - `kicad-studio`: release orchestration `release_complete`, publish `publish_disabled`.
+  - `boardguard`: release PR `#18` open with merge disabled by policy, publish `publish_disabled`.
 
 Skipped:
   - gh-aw automatic triggers remain disabled; Copilot is optional and not part of the required lifecycle path.
+  - Production publish remained disabled by repository policy.
+  - Release PR auto-merge remained disabled by repository policy.
 
-Next: Push workflows, run ruleset autonomy audits, dry-run finalization, then finalize open PRs according to policy.
+Next: Continue with explicitly approved repository rollout or policy changes only.

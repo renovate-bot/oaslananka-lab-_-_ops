@@ -736,3 +736,75 @@ Initial target PR state before lifecycle workflow validation:
 kicad-studio#38 merged at 2026-05-10T08:23:58Z
 boardguard#17 open, approved, mergeable, checks green
 ```
+
+---
+
+## 16. Update - lifecycle autonomy validation and closeout
+
+Generated: 2026-05-10
+
+Implementation commits:
+
+```text
+22b1e8ca142b2a40e9cec34a774878b447eab2de feat(ops): add policy-controlled PR finalize and release orchestration
+8f1d6c651cd5fc0fa0da73d5f43644aab37402ef fix(ops): align autonomy audit with immediate merge policy
+ce653d2cb56069f7261c1cb344c31f783e5d0722 fix(ops): observe push-triggered release workflows
+2c9f42e7f8a72ec810eec9d4b506c28cf70e545d fix(ops): treat disabled publish gates as release observation
+```
+
+Ruleset/autonomy audit:
+
+```text
+test          https://github.com/oaslananka-lab/_ops/actions/runs/25625819697  final_state=ready
+kicad-studio  https://github.com/oaslananka-lab/_ops/actions/runs/25625828733  final_state=ready
+boardguard    https://github.com/oaslananka-lab/_ops/actions/runs/25625843223  final_state=ready
+```
+
+Boardguard finalization:
+
+```text
+PR:                 https://github.com/oaslananka-lab/boardguard/pull/17
+Dry-run finalize:   https://github.com/oaslananka-lab/_ops/actions/runs/25625719334  final_state=dry_run_clean
+Finalize/merge:     https://github.com/oaslananka-lab/_ops/actions/runs/25625866193  final_state=merged_release_dispatched
+Merge commit:       44170c0fc24f8712d43d47c900ea1087f7ed60fc
+Post-merge audit:   https://github.com/oaslananka-lab/_ops/actions/runs/25625882745
+Release plan:       https://github.com/oaslananka-lab/_ops/actions/runs/25625889020
+Release orch.:      https://github.com/oaslananka-lab/_ops/actions/runs/25625956714
+Release workflow:   https://github.com/oaslananka-lab/boardguard/actions/runs/25625883001
+Release state:      release_pr_open_merge_disabled
+Release PR:         https://github.com/oaslananka-lab/boardguard/pull/18
+Publish state:      publish_disabled
+```
+
+Kicad Studio finalization:
+
+```text
+PR:                 https://github.com/oaslananka-lab/kicad-studio/pull/38
+State:              merged before lifecycle workflow deployment
+Merge commit:       693f4be68330593fe3c05903c5d8edcf37491745
+Post-merge audit:   https://github.com/oaslananka-lab/_ops/actions/runs/25625975797
+Release plan:       https://github.com/oaslananka-lab/_ops/actions/runs/25625982516
+Release orch.:      https://github.com/oaslananka-lab/_ops/actions/runs/25626628738
+Release workflow:   https://github.com/oaslananka-lab/kicad-studio/actions/runs/25626637122
+Release state:      release_complete
+Publish state:      publish_disabled
+```
+
+Important release orchestration behavior:
+
+```text
+Push-only release workflows are observed by run id when workflow_dispatch is unavailable or unnecessary.
+Protected publish-environment gates are not treated as blockers when publish.enabled=false.
+No npm, GHCR, VS Marketplace, Open VSX, DockerHub, MCP Registry, or other production publish was approved by _ops.
+The old kicad-studio publish-gate run was cancelled to enforce publish_disabled policy.
+```
+
+Command validation:
+
+```text
+YAML parse                         passed
+actionlint                         passed
+node --test tests/ops-policy.test.mjs  passed
+python -m py_compile services/ops_webhook/app.py  passed
+gitleaks git --log-opts=HEAD~20..HEAD --redact     passed
+```

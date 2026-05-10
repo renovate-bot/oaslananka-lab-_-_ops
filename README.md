@@ -144,7 +144,25 @@ The receiver accepts GitHub webhook POST requests, validates `x-hub-signature-25
 | `push` to the default branch from `oaslananka/*` | Dispatch `repo-mirror-sync.yml`. |
 | `issue_comment` created with `@oaslananka-repo-ops` | Dispatch `inbox-handler.yml` with `event_type=comment`. |
 | `issue_comment` containing `/ops fix` on a PR thread | Dispatch `agent-fix-loop.yml` in patch mode through `inbox-handler.yml`. |
-| `check_run` completed with `failure` or `timed_out` | Dispatch `agent-fix-loop.yml` in suggest mode. |
+| `check_run` completed with `failure` or `timed_out` | Resolve repo policy, then dispatch `agent-fix-loop.yml` in patch or suggest mode. |
+
+Comment commands routed through `inbox-handler.yml` include:
+
+```text
+/ops audit
+/ops baseline
+/ops fix
+/ops finalize
+/ops merge
+/ops auto-merge
+/ops release
+/ops publish
+/ops release-publish
+/ops pause
+/ops resume
+/ops policy
+/ops help
+```
 
 Cloudflare DNS routes `webhook.oaslananka.dev` to the Render service. Both the direct Render health endpoint and the custom domain health endpoint have returned 200 OK in validation.
 

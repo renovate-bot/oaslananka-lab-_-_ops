@@ -35,3 +35,7 @@ audit_incomplete
 ```
 
 `ruleset_blocks_agent` means policy requests a higher-autonomy mode but GitHub rulesets/settings do not permit the GitHub App to complete that lifecycle. The fix is repository-specific: add a narrow bypass actor, adjust the policy down, or keep the repo in guarded/suggest mode.
+
+Disabled repository auto-merge is not a blocker when the repo policy permits immediate merge with expected head SHA protection. In that case the audit remains `ready` and records auto-merge as a warning rather than a final-state failure.
+
+Missing GitHub App bypass is only blocking when active branch rules actually require a review or PR gate that conflicts with the repository policy. Repositories with only deletion, non-fast-forward, or linear-history rules can still be `ready` for immediate expected-SHA merges.

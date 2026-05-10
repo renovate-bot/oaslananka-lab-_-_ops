@@ -29,9 +29,11 @@ load policy
 run repo-release-plan.yml
 discover target release/publish workflows
 dispatch release workflow on main when release is enabled
+observe push-triggered release workflow runs when workflow_dispatch is unavailable or unnecessary
 detect release-please PRs
 avoid merging release PRs unless policy enables it
 report publish_disabled unless publish.enabled=true
+stop at protected publish gates when publish is disabled
 never publish from a PR head
 upload JSON report
 ```
@@ -71,3 +73,5 @@ release_complete
 ```
 
 `publish_disabled` is a clean final state when repository policy disables publish.
+
+When a target release workflow contains both release artifact jobs and protected publish jobs, `_ops` treats the protected environment gate as a publish boundary. If `publish.enabled=false`, the orchestrator records the release workflow observation and reports `publish_disabled` instead of waiting for or approving the protected publish job.
