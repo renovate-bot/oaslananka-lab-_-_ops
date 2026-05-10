@@ -94,6 +94,7 @@ jobs:
 
           final_state="ready"
           issues=()
+          warnings=()
 
           if [[ "$(jq -r '.ok' "${OUT}/repo.json")" != "true" ]]; then
             final_state="app_missing_permission"
@@ -125,8 +126,12 @@ jobs:
           fi
 
           if [[ "$(jq -r '.pr.allow_auto_merge' "${OUT}/policy.json")" == "true" && "$(jq -r '.data.allow_auto_merge // false' "${OUT}/repo.json")" != "true" ]]; then
-            if [[ "${final_state}" == "ready" ]]; then final_state="auto_merge_disabled"; fi
-            issues+=("Repository auto-merge is disabled")
+            if [[ "$(jq -r '.pr.allow_immediate_merge' "${OUT}/policy.json")" == "true" ]]; then
+              warnings+=("Repository auto-merge is disabled, but immediate merge is allowed by policy")
+            else
+              if [[ "${final_state}" == "ready" ]]; then final_state="auto_merge_disabled"; fi
+              issues+=("Repository auto-merge is disabled")
+            fi
           fi
 
           if [[ "$(jq -r '.publish.enabled' "${OUT}/policy.json")" == "true" ]]; then
@@ -151,10 +156,18 @@ jobs:
           ' "${OUT}/repo_rulesets.json" >/dev/null 2>&1; then
             bypass_found=true
           fi
+          review_rule_present=false
+          if jq -e '.data[]? | select(.type == "pull_request" or .type == "required_review_thread_resolution")' "${OUT}/active_branch_rules.json" >/dev/null 2>&1; then
+            review_rule_present=true
+          fi
           if [[ "${profile}" == "full" || "${profile}" == "breakglass" ]]; then
             if [[ "$(jq -r '.rulesets.require_app_bypass_for_full' "${OUT}/policy.json")" == "true" && "${bypass_found}" != "true" ]]; then
-              if [[ "${final_state}" == "ready" ]]; then final_state="ruleset_blocks_agent"; fi
-              issues+=("Full autonomy policy expects GitHub App ruleset bypass where rulesets require it")
+              if [[ "${review_rule_present}" == "true" && "$(jq -r '.pr.require_human_review' "${OUT}/policy.json")" != "true" ]]; then
+                if [[ "${final_state}" == "ready" ]]; then final_state="ruleset_blocks_agent"; fi
+                issues+=("Ruleset review gates require a GitHub App bypass actor for this full-autonomy policy")
+              else
+                warnings+=("No GitHub App ruleset bypass actor found; current active rules do not require it")
+              fi
             fi
           fi
 
@@ -164,6 +177,7 @@ jobs:
           fi
 
           printf '%s\n' "${issues[@]}" | jq -R 'select(length > 0)' | jq -s . > "${OUT}/issues.json"
+          printf '%s\n' "${warnings[@]}" | jq -R 'select(length > 0)' | jq -s . > "${OUT}/warnings.json"
           jq -s '.' "${STEPS}" > "${OUT}/steps.json"
 
           jq -n \
@@ -175,6 +189,7 @@ jobs:
             --arg installation_id "${APP_INSTALLATION_ID}" \
             --slurpfile policy "${OUT}/policy.json" \
             --slurpfile issues "${OUT}/issues.json" \
+            --slurpfile warnings "${OUT}/warnings.json" \
             --slurpfile steps "${OUT}/steps.json" \
             --slurpfile repo "${OUT}/repo.json" \
             --slurpfile actions_permissions "${OUT}/actions_permissions.json" \
@@ -190,6 +205,7 @@ jobs:
               installation_id: $installation_id,
               policy_profile: $policy[0].autonomy.profile,
               issues: $issues[0],
+              warnings: $warnings[0],
               observations: {
                 repo: $repo[0],
                 actions_permissions: $actions_permissions[0],
@@ -209,6 +225,7 @@ jobs:
             echo "| Policy profile | ${profile} |"
             echo "| Final state | ${final_state} |"
             echo "| Issues | $(jq -r 'length' "${OUT}/issues.json") |"
+            echo "| Warnings | $(jq -r 'length' "${OUT}/warnings.json") |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload ruleset autonomy audit
