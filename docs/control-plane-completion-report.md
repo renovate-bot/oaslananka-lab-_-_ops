@@ -341,3 +341,92 @@ agent-fix-loop v2:
   test only on oaslananka-lab/test
   no bulk rollout
 ```
+
+---
+
+## 11. Update - agent-fix-loop v2 and webhook org routing validated
+
+Generated: 2026-05-10
+
+Agent fix loop v2:
+
+```text
+Design doc: docs/agent-fix-loop-v2-design.md
+Workflow:   .github/workflows/agent-fix-loop.yml
+Mode:       suggest and patch
+Boundary:   one PR, same branch, no force push, no auto-merge
+```
+
+Validation on `oaslananka-lab/test`:
+
+```text
+Temporary PR:         https://github.com/oaslananka-lab/test/pull/9
+Suggest run:          https://github.com/oaslananka-lab/_ops/actions/runs/25618366311
+Patch run:            https://github.com/oaslananka-lab/_ops/actions/runs/25618422511
+Final diagnostics:    https://github.com/oaslananka-lab/_ops/actions/runs/25618486334
+Patch commit:         08ca6f69e38ab6914ce81558458ea081a1ff3680
+Final state:          clean
+Check failing:        0
+Check pending:        0
+Run failures:         0
+Unresolved threads:   0
+```
+
+Artifacts downloaded locally:
+
+```text
+agent-diagnostics/agent-fix-loop-suggest-test-9/
+agent-diagnostics/agent-fix-loop-patch-test-9/
+agent-diagnostics/agent-fix-loop-final-diag-test-9/
+```
+
+Cleanup:
+
+```text
+Temporary PR #9 closed
+Temporary branch test/agent-fix-loop-v2-trailing-whitespace deleted
+```
+
+Webhook expansion:
+
+```text
+Org owner routing added for pull_request, issues, issue_comment, and check_run events
+Personal default-branch push still routes to repo-mirror-sync.yml
+Org default-branch push is intentionally ignored by mirror routing
+/ops fix command routes PR threads to agent-fix-loop.yml patch mode
+check_run failure/timed_out routes to agent-fix-loop.yml suggest mode
+```
+
+Webhook deployment/health:
+
+```text
+https://ops-webhook-wi0r.onrender.com/health  -> 200 OK
+https://webhook.oaslananka.dev/health         -> 200 OK
+```
+
+Org routing validation:
+
+```text
+Temporary issue:  https://github.com/oaslananka-lab/test/issues/10
+Inbox run:        https://github.com/oaslananka-lab/_ops/actions/runs/25618602350
+Result:           success
+Bot response:     /ops help command list posted
+Cleanup:          temporary issue #10 closed
+```
+
+Validation commands:
+
+```text
+PyYAML parse all workflows                  OK
+actionlint agent-fix-loop + inbox-handler   OK
+bash -n extracted agent-fix-loop body       OK
+python -m compileall services/ops_webhook   OK
+```
+
+Remaining controlled work:
+
+```text
+1. Validate /ops fix against a temporary PR comment path if a comment-command e2e is required.
+2. Proceed to boardguard marketplace tooling only as the next scoped phase.
+3. Do not start Group B rollout until boardguard final validation is clean.
+```

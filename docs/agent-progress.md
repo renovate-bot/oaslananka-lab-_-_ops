@@ -139,3 +139,37 @@ Next: Add webhook.oaslananka.dev as a Render custom domain or keep App webhook d
 - `oaslananka-repo-ops[bot]` commented on the issue and classified it as `question`.
 
 Next controlled task: `agent-fix-loop v2` design document.
+
+## 2026-05-10 - Agent fix loop v2 and webhook org routing
+
+Completed: 2026-05-10T03:22:00Z
+
+Applied:
+  - Created `docs/agent-fix-loop-v2-design.md`.
+  - Replaced suggestion-only `agent-fix-loop.yml` with v2 bounded patch-loop behavior.
+  - Validated all workflow YAML files with PyYAML.
+  - Validated `agent-fix-loop.yml` and `inbox-handler.yml` with actionlint.
+  - Validated the extracted `agent-fix-loop.yml` bash body with `bash -n`.
+  - Compiled `services/ops_webhook/app.py` with `python -m compileall`.
+  - Tested v2 on temporary `oaslananka-lab/test` PR #9:
+    - Suggest run: https://github.com/oaslananka-lab/_ops/actions/runs/25618366311
+    - Patch run: https://github.com/oaslananka-lab/_ops/actions/runs/25618422511
+    - Final diagnostics: https://github.com/oaslananka-lab/_ops/actions/runs/25618486334
+    - Result: failing=0, pending=0, current-head run failures=0, unresolved review threads=0.
+  - Closed temporary test PR #9 and deleted its branch.
+  - Expanded webhook routing to include `oaslananka-lab` org repositories for PR, issue, issue-comment, and failed check-run events.
+  - Kept default-branch mirror routing personal-only to preserve `oaslananka -> oaslananka-lab` sync direction.
+  - Added `/ops fix` command handling to `inbox-handler.yml`.
+  - Verified Render direct and custom-domain health:
+    - https://ops-webhook-wi0r.onrender.com/health
+    - https://webhook.oaslananka.dev/health
+  - Verified deployed org routing with a signed synthetic `/ops help` issue-comment event on temporary `oaslananka-lab/test` issue #10.
+  - Verified inbox-handler run https://github.com/oaslananka-lab/_ops/actions/runs/25618602350 completed and posted the `/ops help` response.
+  - Closed temporary test issue #10.
+
+Skipped:
+  - Boardguard and Group B rollout. The controlled next step remains a separate boardguard validation, then explicit per-repo rollout.
+  - Auto-merge and force-push behavior. v2 only pushed to the same temporary PR branch and left merge decisions manual.
+  - Render MCP deploy inspection because the Render MCP reported no selected workspace and no Render CLI/API token was available locally.
+
+Next: Validate `/ops fix` against a temporary PR comment path or proceed to boardguard final marketplace tooling only after explicit scope confirmation.
