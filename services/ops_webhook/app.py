@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import logging
@@ -30,6 +31,14 @@ CHECK_RUN_WORKFLOW = os.getenv("CHECK_RUN_WORKFLOW", "agent-fix-loop.yml")
 
 PR_ACTIONS = {"opened", "synchronize", "reopened", "closed"}
 CHECK_RUN_FAILURES = {"failure", "timed_out"}
+
+SUGGEST_POLICY: dict[str, Any] = {
+    "autonomy": {"enabled": True, "profile": "suggest"},
+    "agent": {"patch": False, "patch_mode_on_check_run_failure": "suggest", "max_iterations": 3},
+    "pr": {"finalize": False, "merge": False},
+    "release": {"enabled": False, "trigger_after_merge": False},
+    "publish": {"enabled": False},
+}
 
 
 def _json(status: str, **payload: Any) -> JSONResponse:
@@ -100,6 +109,114 @@ async def github_get(path: str) -> dict[str, Any] | None:
     return response.json()
 
 
+def _strip_inline_comment(value: str) -> str:
+    quote = None
+    for index, char in enumerate(value):
+        if char in {"'", '"'} and (index == 0 or value[index - 1] != "\\"):
+            quote = None if quote == char else quote or char
+        if char == "#" and quote is None and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value.rstrip()
+
+
+def _parse_scalar(raw: str) -> Any:
+    value = _strip_inline_comment(raw).strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value == "null":
+        return None
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    return value
+
+
+def _parse_simple_yaml(text: str) -> dict[str, Any]:
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
+    for line_number, raw_line in enumerate(text.replace("\r\n", "\n").split("\n"), start=1):
+        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent % 2:
+            raise ValueError(f"invalid indentation at line {line_number}")
+        line = raw_line.strip()
+        if ":" not in line:
+            raise ValueError(f"invalid mapping at line {line_number}")
+        key, rest = line.split(":", 1)
+        key = key.strip()
+        while len(stack) > 1 and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1]
+        if rest.strip() == "":
+            parent[key] = {}
+            stack.append((indent, parent[key]))
+        else:
+            parent[key] = _parse_scalar(rest)
+    return root
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if key == "extends":
+            merged[key] = value
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+async def get_ops_file(path: str) -> dict[str, Any] | None:
+    owner_repo = OPS_REPO.split("/", 1)
+    if len(owner_repo) != 2:
+        return None
+    owner, repo = owner_repo
+    data = await github_get(f"repos/{owner}/{repo}/contents/{path}?ref=main")
+    if not data or "content" not in data:
+        return None
+    try:
+        content = base64.b64decode(data["content"]).decode("utf-8")
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("failed to decode ops file %s: %s", path, exc)
+        return None
+    return {"path": path, "content": content}
+
+
+async def get_effective_policy(owner: str, repo: str) -> dict[str, Any]:
+    try:
+        default_file = await get_ops_file("config/repo-autonomy.default.yml")
+        if not default_file:
+            return SUGGEST_POLICY
+        policy = _parse_simple_yaml(default_file["content"])
+        override_file = await get_ops_file(f"config/repos/{owner}/{repo}.yml")
+        if override_file:
+            policy = _deep_merge(policy, _parse_simple_yaml(override_file["content"]))
+        return policy
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("failed to resolve policy for %s/%s: %s", owner, repo, exc)
+        return SUGGEST_POLICY
+
+
+def _policy_patch_mode(policy: dict[str, Any]) -> str:
+    autonomy = policy.get("autonomy") or {}
+    agent = policy.get("agent") or {}
+    if autonomy.get("enabled") is False:
+        return "ignore"
+    profile = autonomy.get("profile", "suggest")
+    if profile == "off":
+        return "ignore"
+    if profile == "suggest" or agent.get("patch") is False:
+        return "suggest"
+    if profile in {"patch", "guarded", "full", "breakglass"}:
+        return "patch"
+    return "suggest"
+
+
 def _repository_identity(payload: dict[str, Any]) -> tuple[str, str, str]:
     repository = payload.get("repository") or {}
     owner = (repository.get("owner") or {}).get("login") or ""
@@ -131,7 +248,9 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
                 pr_num = pr.get("number")
                 if pr_num:
                     pr_state = await github_get(f"repos/{owner}/{repo}/pulls/{pr_num}")
-                    if pr_state and pr_state.get("state") != "open":
+                    if not pr_state:
+                        return {"handled": False, "reason": "pull request state unavailable", "owner": owner, "repo": repo}
+                    if pr_state.get("state") != "open":
                         return {
                             "handled": False,
                             "reason": "pull request is not open",
@@ -139,18 +258,43 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
                             "repo": repo,
                             "pr_number": str(pr_num),
                         }
+                    policy = await get_effective_policy(owner, repo)
+                    patch_mode = _policy_patch_mode(policy)
+                    if patch_mode == "ignore":
+                        return {"handled": False, "reason": "policy disables check_run automation", "owner": owner, "repo": repo}
+                    max_iterations = str((policy.get("agent") or {}).get("max_iterations", 3))
                     inputs = {
                         "target_owner": owner,
                         "target_repo": repo,
                         "pr_number": str(pr_num),
                     }
                     if CHECK_RUN_WORKFLOW == "agent-fix-loop.yml":
-                        inputs.update({"max_iterations": "3", "patch_mode": "suggest"})
+                        inputs.update({"max_iterations": max_iterations, "patch_mode": patch_mode})
                     return await dispatch(
                         CHECK_RUN_WORKFLOW,
                         inputs,
                     )
         return {"handled": False, "reason": "check_run not actionable", "conclusion": conclusion}
+
+    if event == "pull_request" and action == "closed":
+        pr = payload.get("pull_request") or {}
+        if pr.get("merged") is True:
+            policy = await get_effective_policy(owner, repo)
+            release = policy.get("release") or {}
+            if release.get("enabled") is True and release.get("trigger_after_merge") is True:
+                return await dispatch(
+                    "ops-release-orchestrator.yml",
+                    {
+                        "target_owner": owner,
+                        "target_repo": repo,
+                        "source_pr": str(pr.get("number", "")),
+                        "merge_commit_sha": str((pr.get("merge_commit_sha") or "")),
+                        "requested_action": "release",
+                        "dry_run": "false",
+                    },
+                )
+            return {"handled": False, "reason": "release disabled by policy after merge", "owner": owner, "repo": repo}
+        return {"handled": False, "reason": "pull request closed without merge", "owner": owner, "repo": repo}
 
     if event == "pull_request" and action in PR_ACTIONS:
         pr = payload.get("pull_request") or {}

@@ -37,6 +37,9 @@ docs/agent-operating-contract.md
 | `repo-mirror-sync.yml` | Syncs a personal source repo to its organization mirror and emits a mirror-sync JSON artifact. |
 | `inbox-handler.yml` | Handles webhook-routed issue/comment events, acknowledges issues, classifies them, labels ops/security issues, and dispatches `/ops` commands. |
 | `agent-fix-loop.yml` | Runs the bounded autonomous fix loop for one PR in `suggest` or `patch` mode. Patch mode checks out the same PR branch, applies deterministic low-risk fixes, commits without GPG signing, pushes without force, and repeats diagnostics. |
+| `ops-pr-finalize.yml` | Policy-controlled PR finalization and merge authority. Enforces diagnostics, expected head SHA, review-thread gates, merge policy, post-merge audit, and release dispatch. |
+| `ops-release-orchestrator.yml` | Policy-controlled release and publish orchestration. Runs release readiness checks, dispatches release workflows, and reports publish-disabled or environment-gated states. |
+| `repo-ruleset-autonomy-audit.yml` | Checks whether repository rulesets/settings allow the configured autonomy profile to work. |
 | `repo-multi-onboarding.yml` | Dispatches `repo-onboarding.yml` for the Group B pilot repositories in parallel. |
 | `repo-release-plan.yml` | Assesses release readiness: environments, release-please files, release workflow permissions, attestations, immutable releases, tags, and latest release. |
 | `repo-release-apply.yml` | Applies release configuration such as the production environment and optional immutable releases. |
@@ -55,6 +58,33 @@ The gh-aw workflows are dispatch-only until the Copilot engine secret is configu
 
 The webhook ignores `_ops` repository events by default to avoid recursive control-plane repair loops.
 Failed `check_run` routing verifies that the associated pull request is still open before dispatching an auto-fix workflow.
+
+## Lifecycle Autonomy
+
+Deterministic lifecycle automation does not require Copilot or gh-aw. The required path is:
+
+```text
+GitHub webhook or /ops command
+-> _ops workflow
+-> GitHub App target token
+-> repo autonomy policy
+-> deterministic patch/finalize/release workflow
+-> JSON artifact report
+```
+
+Policy lives under:
+
+```text
+config/repo-autonomy.default.yml
+config/repos/<owner>/<repo>.yml
+```
+
+Use:
+
+```powershell
+node scripts/ops-policy.mjs check --owner oaslananka-lab --repo boardguard
+node scripts/ops-policy.mjs patch-mode --owner oaslananka-lab --repo boardguard
+```
 
 ## Onboard a Repository
 

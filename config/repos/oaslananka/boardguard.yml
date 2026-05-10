@@ -1,0 +1,21 @@
+version: 1
+extends: ../../repo-autonomy.default.yml
+
+autonomy:
+  enabled: true
+  profile: suggest
+
+agent:
+  patch: false
+  patch_mode_on_check_run_failure: suggest
+
+pr:
+  finalize: false
+  merge: false
+
+release:
+  enabled: false
+  trigger_after_merge: false
+
+publish:
+  enabled: false

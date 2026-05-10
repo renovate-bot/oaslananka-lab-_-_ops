@@ -1,0 +1,220 @@
+name: Repo Ruleset Autonomy Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ruleset-autonomy-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Create target GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Audit ruleset autonomy compatibility
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          APP_INSTALLATION_ID: ${{ steps.app.outputs.installation-id }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="out"
+          RAW="${OUT}/raw"
+          ERR="${OUT}/errors"
+          mkdir -p "${RAW}" "${ERR}"
+          REPORT="${OUT}/ruleset-autonomy-audit-${TARGET_OWNER}-${TARGET_REPO}.json"
+          STEPS="${OUT}/steps.ndjson"
+          : > "${STEPS}"
+
+          api_capture() {
+            local name="$1"
+            local endpoint="$2"
+            shift 2
+            if gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "${endpoint}" "$@" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+              jq -n --arg endpoint "${endpoint}" --slurpfile data "${RAW}/${name}.json" \
+                '{ok:true,endpoint:$endpoint,data:$data[0]}' > "${OUT}/${name}.json"
+            else
+              jq -n --arg endpoint "${endpoint}" --arg error "$(cat "${ERR}/${name}.err")" \
+                '{ok:false,endpoint:$endpoint,error:$error}' > "${OUT}/${name}.json"
+            fi
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
+          node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
+          profile="$(jq -r '.autonomy.profile' "${OUT}/policy.json")"
+          record "policy" "loaded" "profile=${profile}"
+
+          api_capture repo "repos/${REPO}"
+          default_branch="$(jq -r '.data.default_branch // "main"' "${OUT}/repo.json")"
+          api_capture actions_permissions "repos/${REPO}/actions/permissions"
+          api_capture repo_rulesets "repos/${REPO}/rulesets" -F includes_parents=true -F per_page=100
+          api_capture active_branch_rules "repos/${REPO}/rules/branches/${default_branch}" -F per_page=100
+          api_capture environments "repos/${REPO}/environments" -F per_page=100
+          api_capture actions_secrets "repos/${REPO}/actions/secrets" -F per_page=100
+
+          final_state="ready"
+          issues=()
+
+          if [[ "$(jq -r '.ok' "${OUT}/repo.json")" != "true" ]]; then
+            final_state="app_missing_permission"
+            issues+=("GitHub App cannot read repository")
+          fi
+          if [[ "$(jq -r '.data.enabled // true' "${OUT}/actions_permissions.json")" != "true" ]]; then
+            final_state="actions_disabled"
+            issues+=("Actions are disabled")
+          fi
+
+          merge_method="$(jq -r '.pr.merge_method' "${OUT}/policy.json")"
+          case "${merge_method}" in
+            squash)
+              merge_enabled="$(jq -r '.data.allow_squash_merge // false' "${OUT}/repo.json")"
+              ;;
+            merge)
+              merge_enabled="$(jq -r '.data.allow_merge_commit // false' "${OUT}/repo.json")"
+              ;;
+            rebase)
+              merge_enabled="$(jq -r '.data.allow_rebase_merge // false' "${OUT}/repo.json")"
+              ;;
+            *)
+              merge_enabled="false"
+              ;;
+          esac
+          if [[ "$(jq -r '.pr.merge' "${OUT}/policy.json")" == "true" && "${merge_enabled}" != "true" ]]; then
+            final_state="merge_method_disabled"
+            issues+=("Policy merge_method=${merge_method} is not enabled on the repository")
+          fi
+
+          if [[ "$(jq -r '.pr.allow_auto_merge' "${OUT}/policy.json")" == "true" && "$(jq -r '.data.allow_auto_merge // false' "${OUT}/repo.json")" != "true" ]]; then
+            if [[ "${final_state}" == "ready" ]]; then final_state="auto_merge_disabled"; fi
+            issues+=("Repository auto-merge is disabled")
+          fi
+
+          if [[ "$(jq -r '.publish.enabled' "${OUT}/policy.json")" == "true" ]]; then
+            env_name="$(jq -r '.publish.require_environment' "${OUT}/policy.json")"
+            if ! jq -e --arg env_name "${env_name}" '.data.environments[]? | select(.name == $env_name)' "${OUT}/environments.json" >/dev/null; then
+              final_state="environment_missing"
+              issues+=("Required publish environment is missing: ${env_name}")
+            fi
+          fi
+
+          if [[ "${profile}" != "off" && "${profile}" != "suggest" && "${profile}" != "patch" && "${profile}" != "guarded" && "${profile}" != "full" && "${profile}" != "breakglass" ]]; then
+            final_state="profile_not_supported"
+            issues+=("Unsupported profile: ${profile}")
+          fi
+
+          bypass_found=false
+          if jq -e --arg slug "${APP_SLUG}" '
+            .data[]? |
+            select(.bypass_actors != null) |
+            .bypass_actors[]? |
+            select((.actor_type == "Integration") and ((.actor_name // .actor_slug // "") == $slug or (.actor_id|tostring) != ""))
+          ' "${OUT}/repo_rulesets.json" >/dev/null 2>&1; then
+            bypass_found=true
+          fi
+          if [[ "${profile}" == "full" || "${profile}" == "breakglass" ]]; then
+            if [[ "$(jq -r '.rulesets.require_app_bypass_for_full' "${OUT}/policy.json")" == "true" && "${bypass_found}" != "true" ]]; then
+              if [[ "${final_state}" == "ready" ]]; then final_state="ruleset_blocks_agent"; fi
+              issues+=("Full autonomy policy expects GitHub App ruleset bypass where rulesets require it")
+            fi
+          fi
+
+          if [[ "$(jq -r '.ok' "${OUT}/repo_rulesets.json")" != "true" || "$(jq -r '.ok' "${OUT}/active_branch_rules.json")" != "true" ]]; then
+            if [[ "${final_state}" == "ready" ]]; then final_state="audit_incomplete"; fi
+            issues+=("Ruleset endpoints were partially unavailable")
+          fi
+
+          printf '%s\n' "${issues[@]}" | jq -R 'select(length > 0)' | jq -s . > "${OUT}/issues.json"
+          jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg target "${REPO}" \
+            --arg default_branch "${default_branch}" \
+            --arg final_state "${final_state}" \
+            --arg app_slug "${APP_SLUG}" \
+            --arg installation_id "${APP_INSTALLATION_ID}" \
+            --slurpfile policy "${OUT}/policy.json" \
+            --slurpfile issues "${OUT}/issues.json" \
+            --slurpfile steps "${OUT}/steps.json" \
+            --slurpfile repo "${OUT}/repo.json" \
+            --slurpfile actions_permissions "${OUT}/actions_permissions.json" \
+            --slurpfile repo_rulesets "${OUT}/repo_rulesets.json" \
+            --slurpfile active_branch_rules "${OUT}/active_branch_rules.json" \
+            --slurpfile environments "${OUT}/environments.json" \
+            '{
+              generated_at: $generated_at,
+              target: $target,
+              default_branch: $default_branch,
+              final_state: $final_state,
+              app_slug: $app_slug,
+              installation_id: $installation_id,
+              policy_profile: $policy[0].autonomy.profile,
+              issues: $issues[0],
+              observations: {
+                repo: $repo[0],
+                actions_permissions: $actions_permissions[0],
+                repo_rulesets: $repo_rulesets[0],
+                active_branch_rules: $active_branch_rules[0],
+                environments: $environments[0]
+              },
+              steps: $steps[0]
+            }' > "${REPORT}"
+
+          {
+            echo "### Repo Ruleset Autonomy Audit"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Policy profile | ${profile} |"
+            echo "| Final state | ${final_state} |"
+            echo "| Issues | $(jq -r 'length' "${OUT}/issues.json") |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload ruleset autonomy audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ruleset-autonomy-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14

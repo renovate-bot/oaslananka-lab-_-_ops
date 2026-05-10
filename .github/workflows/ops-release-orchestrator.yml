@@ -1,0 +1,307 @@
+name: Ops Release Orchestrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      source_pr:
+        required: false
+        default: ""
+        type: string
+      merge_commit_sha:
+        required: false
+        default: ""
+        type: string
+      requested_action:
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - publish
+          - release_and_publish
+      dry_run:
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ops-release-orchestrator-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Create target GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Orchestrate release
+        env:
+          TARGET_TOKEN: ${{ steps.app.outputs.token }}
+          OPS_TOKEN: ${{ github.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          MERGE_COMMIT_SHA: ${{ inputs.merge_commit_sha }}
+          REQUESTED_ACTION: ${{ inputs.requested_action }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="${GITHUB_WORKSPACE}/out"
+          RAW="${OUT}/raw"
+          mkdir -p "${RAW}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/release-orchestrator-${TARGET_OWNER}-${TARGET_REPO}.json"
+          : > "${STEPS}"
+
+          final_state="release_disabled"
+          release_plan_run_id=""
+          release_workflow_run_id=""
+          publish_workflow_run_id=""
+          release_pr_number=""
+          tag_name=""
+          publish_state="publish_disabled"
+
+          target_api() {
+            GH_TOKEN="${TARGET_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_api() {
+            GH_TOKEN="${OPS_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_gh() {
+            GH_TOKEN="${OPS_TOKEN}" gh "$@"
+          }
+
+          target_gh() {
+            GH_TOKEN="${TARGET_TOKEN}" gh "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          write_report() {
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg target "${REPO}" \
+              --arg source_pr "${SOURCE_PR}" \
+              --arg merge_commit_sha "${MERGE_COMMIT_SHA}" \
+              --arg requested_action "${REQUESTED_ACTION}" \
+              --argjson dry_run "$(if [[ "${DRY_RUN}" == "true" ]]; then echo true; else echo false; fi)" \
+              --arg policy_profile "$(jq -r '.autonomy.profile // "unknown"' "${OUT}/policy.json" 2>/dev/null || echo unknown)" \
+              --arg release_plan_run_id "${release_plan_run_id}" \
+              --arg release_workflow_run_id "${release_workflow_run_id}" \
+              --arg publish_workflow_run_id "${publish_workflow_run_id}" \
+              --arg release_pr_number "${release_pr_number}" \
+              --arg tag_name "${tag_name}" \
+              --arg publish_state "${publish_state}" \
+              --arg final_state "${final_state}" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{
+                generated_at: $generated_at,
+                target: $target,
+                source_pr: (if $source_pr == "" then null else ($source_pr|tonumber) end),
+                merge_commit_sha: (if $merge_commit_sha == "" then null else $merge_commit_sha end),
+                requested_action: $requested_action,
+                dry_run: $dry_run,
+                policy_profile: $policy_profile,
+                release_plan_run_id: (if $release_plan_run_id == "" then null else ($release_plan_run_id|tonumber) end),
+                release_workflow_run_id: (if $release_workflow_run_id == "" then null else ($release_workflow_run_id|tonumber) end),
+                publish_workflow_run_id: (if $publish_workflow_run_id == "" then null else ($publish_workflow_run_id|tonumber) end),
+                release_pr_number: (if $release_pr_number == "" then null else ($release_pr_number|tonumber) end),
+                tag_name: (if $tag_name == "" then null else $tag_name end),
+                publish_state: $publish_state,
+                final_state: $final_state,
+                steps: $steps[0]
+              }' > "${REPORT}"
+          }
+          trap write_report EXIT
+
+          dispatch_ops_workflow() {
+            local workflow="$1"
+            local body_file="${RAW}/dispatch-${workflow}.json"
+            local response_file="${RAW}/dispatch-${workflow}.json.response"
+            shift
+            jq -n --arg ref "main" '{ref:$ref,inputs:{}}' > "${body_file}"
+            while [[ "$#" -gt 0 ]]; do
+              local key="$1"
+              local value="$2"
+              local next="${body_file}.next"
+              jq --arg key "${key}" --arg value "${value}" '.inputs += {($key): $value}' "${body_file}" > "${next}"
+              mv "${next}" "${body_file}"
+              shift 2
+            done
+            ops_api --method POST "repos/${OPS_REPO}/actions/workflows/${workflow}/dispatches" \
+              --input "${body_file}" > "${response_file}"
+            local run_id
+            run_id="$(jq -r '.workflow_run_id // .id // empty' "${response_file}")"
+            if [[ -z "${run_id}" ]]; then
+              sleep 8
+              run_id="$(ops_gh run list --repo "${OPS_REPO}" --workflow "${workflow}" --limit 10 --json databaseId |
+                jq -r '.[0].databaseId // empty')"
+            fi
+            [[ -n "${run_id}" ]] || return 1
+            echo "${run_id}"
+          }
+
+          wait_ops_run() {
+            ops_gh run watch "$1" --repo "${OPS_REPO}" --exit-status
+          }
+
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
+          node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
+          record "policy" "loaded" "${REPO}"
+
+          release_requested=false
+          publish_requested=false
+          if [[ "${REQUESTED_ACTION}" == "release" || "${REQUESTED_ACTION}" == "release_and_publish" ]]; then
+            release_requested=true
+          fi
+          if [[ "${REQUESTED_ACTION}" == "publish" || "${REQUESTED_ACTION}" == "release_and_publish" ]]; then
+            publish_requested=true
+          fi
+
+          if [[ "${release_requested}" == "true" && "$(jq -r '.release.enabled' "${OUT}/policy.json")" != "true" ]]; then
+            final_state="release_disabled"
+            record "release" "disabled" "policy release.enabled=false"
+          else
+            release_plan_run_id="$(dispatch_ops_workflow repo-release-plan.yml target_owner "${TARGET_OWNER}" target_repo "${TARGET_REPO}")" || {
+              final_state="release_plan_failed"
+              record "release_plan" "dispatch_failed" "repo-release-plan.yml"
+              exit 0
+            }
+            if ! wait_ops_run "${release_plan_run_id}"; then
+              final_state="release_plan_failed"
+              record "release_plan" "failed" "run_id=${release_plan_run_id}"
+              exit 0
+            fi
+            record "release_plan" "success" "run_id=${release_plan_run_id}"
+
+            target_api --method GET "repos/${REPO}/actions/workflows" -F per_page=100 > "${RAW}/workflows.json"
+            release_workflow="$(jq -r '.workflows[]? | select(.path == ".github/workflows/release.yml" or .path == ".github/workflows/release-please.yml") | .path' "${RAW}/workflows.json" | head -n 1)"
+            publish_workflow="$(jq -r '.workflows[]? | select(.path == ".github/workflows/publish.yml" or .path == ".github/workflows/npm-publish.yml" or .path == ".github/workflows/marketplace-publish.yml") | .path' "${RAW}/workflows.json" | head -n 1)"
+
+            if [[ "${release_requested}" == "true" ]]; then
+              if [[ -z "${release_workflow}" ]]; then
+                final_state="release_workflow_not_found"
+                record "release_workflow" "not_found" "release.yml or release-please.yml"
+              elif [[ "${DRY_RUN}" == "true" ]]; then
+                final_state="release_workflow_dispatched"
+                record "release_workflow" "dry_run" "${release_workflow}"
+              else
+                before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+                target_gh workflow run "${release_workflow}" --repo "${REPO}" --ref main || {
+                  final_state="release_workflow_failed"
+                  record "release_workflow" "dispatch_failed" "${release_workflow}"
+                  exit 0
+                }
+                sleep 8
+                release_workflow_run_id="$(target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 10 --json databaseId,createdAt |
+                  jq -r --arg before "${before}" 'map(select(.createdAt >= $before)) | first.databaseId // .[0].databaseId // empty')"
+                if [[ -n "${release_workflow_run_id}" ]]; then
+                  target_gh run watch "${release_workflow_run_id}" --repo "${REPO}" --exit-status || {
+                    final_state="release_workflow_failed"
+                    record "release_workflow" "failed" "run_id=${release_workflow_run_id}"
+                    exit 0
+                  }
+                fi
+                final_state="release_workflow_dispatched"
+                record "release_workflow" "success" "${release_workflow} run_id=${release_workflow_run_id}"
+              fi
+
+              target_gh pr list --repo "${REPO}" --state open --json number,title,headRefName,author \
+                > "${RAW}/release-prs.json" || echo "[]" > "${RAW}/release-prs.json"
+              release_pr_number="$(jq -r '.[] | select((.headRefName // "" | test("release-please"; "i")) or (.title // "" | test("release|chore\\(main\\): release"; "i"))) | .number' "${RAW}/release-prs.json" | head -n 1)"
+              if [[ -n "${release_pr_number}" && "$(jq -r '.release.merge_release_pr' "${OUT}/policy.json")" != "true" ]]; then
+                final_state="release_pr_open_merge_disabled"
+                record "release_pr" "open_merge_disabled" "#${release_pr_number}"
+              elif [[ -n "${release_pr_number}" ]]; then
+                final_state="release_pr_finalize_dispatched"
+                record "release_pr" "finalize_requested" "#${release_pr_number}"
+              elif [[ "${final_state}" == "release_workflow_dispatched" ]]; then
+                final_state="release_complete"
+              fi
+            fi
+          fi
+
+          if [[ "${publish_requested}" == "true" || "${release_requested}" == "true" ]]; then
+            if [[ "$(jq -r '.publish.enabled' "${OUT}/policy.json")" != "true" ]]; then
+              publish_state="publish_disabled"
+              if [[ "${publish_requested}" == "true" ]]; then
+                final_state="publish_disabled"
+              fi
+              record "publish" "disabled" "policy publish.enabled=false"
+            elif [[ -z "${publish_workflow}" ]]; then
+              final_state="publish_workflow_not_found"
+              publish_state="publish_workflow_not_found"
+              record "publish_workflow" "not_found" "publish workflow missing"
+            elif [[ "${DRY_RUN}" == "true" ]]; then
+              final_state="publish_workflow_dispatched"
+              publish_state="dry_run"
+              record "publish_workflow" "dry_run" "${publish_workflow}"
+            else
+              final_state="awaiting_environment_approval"
+              publish_state="awaiting_environment_approval"
+              record "publish" "environment_gated" "$(jq -r '.publish.require_environment' "${OUT}/policy.json")"
+            fi
+          fi
+
+          {
+            echo "### Ops Release Orchestrator"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| Requested action | ${REQUESTED_ACTION} |"
+            echo "| Final state | ${final_state} |"
+            echo "| Publish state | ${publish_state} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload release orchestrator report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-orchestrator-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14

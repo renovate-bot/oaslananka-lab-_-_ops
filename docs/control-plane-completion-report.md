@@ -689,3 +689,50 @@ Final smoke:
 repo-ops-cross-repo-smoke.yml https://github.com/oaslananka-lab/_ops/actions/runs/25623940448
 result                        success
 ```
+
+---
+
+## 15. Update - policy-controlled lifecycle autonomy
+
+Generated: 2026-05-10
+
+The previous control-plane pass stabilized webhook routing and gh-aw dispatch-only workflows, but it did not provide a full patch-to-merge-to-release lifecycle. Copilot is not required for the deterministic path.
+
+New control-plane files:
+
+```text
+config/repo-autonomy.default.yml
+config/repo-autonomy.schema.json
+config/repos/oaslananka-lab/*.yml
+config/repos/oaslananka/*.yml
+scripts/ops-policy.mjs
+tests/ops-policy.test.mjs
+.github/workflows/ops-pr-finalize.yml
+.github/workflows/ops-release-orchestrator.yml
+.github/workflows/repo-ruleset-autonomy-audit.yml
+docs/autonomy-policy.md
+docs/merge-release-orchestration.md
+docs/ruleset-autonomy.md
+```
+
+Lifecycle path:
+
+```text
+detect -> diagnose -> patch -> validate -> finalize -> merge -> post-merge audit -> release orchestration -> publish policy report
+```
+
+gh-aw/Copilot status:
+
+```text
+optional only
+dispatch-only
+not required for merge/release/publish lifecycle
+COPILOT_GITHUB_TOKEN not required for deterministic _ops workflows
+```
+
+Initial target PR state before lifecycle workflow validation:
+
+```text
+kicad-studio#38 merged at 2026-05-10T08:23:58Z
+boardguard#17 open, approved, mergeable, checks green
+```

@@ -48,6 +48,11 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
       - name: Resolve inputs
         id: resolved
         shell: bash
@@ -149,7 +154,7 @@ jobs:
           post_comment() {
             local body_file="$1"
             api --method POST "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" \
-              --input "${body_file}"
+              --input "${body_file}" >/dev/null
           }
 
           update_comment() {
@@ -208,7 +213,39 @@ jobs:
             jq -r '.workflow_run_id // .id // empty' "${response_file}"
           }
 
+          dispatch_finalize() {
+            local pr_num="$1"
+            local requested_action="$2"
+            api --method GET "repos/${REPO}/pulls/${pr_num}" > "${RAW}/pr-${pr_num}.json"
+            local head_sha
+            head_sha="$(jq -r '.head.sha // ""' "${RAW}/pr-${pr_num}.json")"
+            trigger_ops_workflow ops-pr-finalize.yml \
+              -f target_owner="${TARGET_OWNER}" \
+              -f target_repo="${TARGET_REPO}" \
+              -f pr_number="${pr_num}" \
+              -f requested_action="${requested_action}" \
+              -f expected_head_sha="${head_sha}" \
+              -f dry_run="false" >/dev/null
+          }
+
+          dispatch_release_orchestrator() {
+            local requested_action="$1"
+            trigger_ops_workflow ops-release-orchestrator.yml \
+              -f target_owner="${TARGET_OWNER}" \
+              -f target_repo="${TARGET_REPO}" \
+              -f requested_action="${requested_action}" \
+              -f dry_run="false" >/dev/null
+          }
+
+          post_body() {
+            local body="$1"
+            local file="${OUT}/comment-$(date +%s%N).json"
+            jq -n --arg body "${body}" '{body:$body}' > "${file}"
+            post_comment "${file}"
+          }
+
           if [[ "${EVENT_TYPE}" == "comment" ]]; then
+            node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
             api --method GET "repos/${REPO}/issues/${ISSUE_NUMBER}" > "${RAW}/issue.json"
             api --method GET "repos/${REPO}/issues/${ISSUE_NUMBER}/comments" -F per_page=100 > "${RAW}/comments.json"
             jq 'sort_by(.created_at) | last // {}' "${RAW}/comments.json" > "${RAW}/comment.json"
@@ -216,44 +253,108 @@ jobs:
 
             command="none"
             action_result="ignored"
+            pause_label="$(jq -r '.ops.pause_label // "ops-paused"' "${OUT}/policy.json")"
+            is_pr="$(jq -r 'has("pull_request")' "${RAW}/issue.json")"
+            pr_num="${PR_NUMBER}"
+            if [[ -z "${pr_num}" && "${is_pr}" == "true" ]]; then
+              pr_num="$(jq -r '.number // ""' "${RAW}/issue.json")"
+            fi
+            is_paused="$(jq -r --arg pause_label "${pause_label}" '[.labels[]?.name] | index($pause_label) != null' "${RAW}/issue.json")"
 
-            if grep -Eiq '/ops[[:space:]]+audit' <<< "${comment_body}"; then
+            if grep -Eiq '/ops[[:space:]]+release-publish' <<< "${comment_body}"; then
+              command="release-publish"
+            elif grep -Eiq '/ops[[:space:]]+auto-merge' <<< "${comment_body}"; then
+              command="auto-merge"
+            elif grep -Eiq '/ops[[:space:]]+finalize' <<< "${comment_body}"; then
+              command="finalize"
+            elif grep -Eiq '/ops[[:space:]]+merge' <<< "${comment_body}"; then
+              command="merge"
+            elif grep -Eiq '/ops[[:space:]]+release' <<< "${comment_body}"; then
+              command="release"
+            elif grep -Eiq '/ops[[:space:]]+publish' <<< "${comment_body}"; then
+              command="publish"
+            elif grep -Eiq '/ops[[:space:]]+pause' <<< "${comment_body}"; then
+              command="pause"
+            elif grep -Eiq '/ops[[:space:]]+resume' <<< "${comment_body}"; then
+              command="resume"
+            elif grep -Eiq '/ops[[:space:]]+policy' <<< "${comment_body}"; then
+              command="policy"
+            elif grep -Eiq '/ops[[:space:]]+audit' <<< "${comment_body}"; then
+              command="audit"
+            elif grep -Eiq '/ops[[:space:]]+baseline' <<< "${comment_body}"; then
+              command="baseline"
+            elif grep -Eiq '/ops[[:space:]]+fix' <<< "${comment_body}"; then
+              command="fix"
+            elif grep -Eiq '/ops[[:space:]]+help' <<< "${comment_body}"; then
+              command="help"
+            fi
+
+            if [[ "${is_paused}" == "true" && "${command}" != "resume" && "${command}" != "policy" ]]; then
+              post_body "Ops automation is paused for this thread. Allowed commands: \`/ops resume\`, \`/ops policy\`."
+              action_result="blocked by ${pause_label}"
+            elif [[ "${command}" == "audit" ]]; then
               trigger_ops_workflow repo-audit.yml \
                 -f target_owner="${TARGET_OWNER}" \
-                -f target_repo="${TARGET_REPO}"
-              command="audit"
+                -f target_repo="${TARGET_REPO}" >/dev/null
               action_result="triggered repo-audit.yml"
-            elif grep -Eiq '/ops[[:space:]]+baseline' <<< "${comment_body}"; then
+            elif [[ "${command}" == "baseline" ]]; then
               trigger_ops_workflow repo-baseline-plan.yml \
                 -f target_owner="${TARGET_OWNER}" \
-                -f target_repo="${TARGET_REPO}"
-              command="baseline"
+                -f target_repo="${TARGET_REPO}" >/dev/null
               action_result="triggered repo-baseline-plan.yml"
-            elif grep -Eiq '/ops[[:space:]]+fix' <<< "${comment_body}"; then
-              pr_num="${PR_NUMBER}"
-              if [[ -z "${pr_num}" && "$(jq -r 'has("pull_request")' "${RAW}/issue.json")" == "true" ]]; then
-                pr_num="$(jq -r '.number // ""' "${RAW}/issue.json")"
-              fi
-
+            elif [[ "${command}" == "fix" ]]; then
               if [[ -n "${pr_num}" ]]; then
                 trigger_ops_workflow agent-fix-loop.yml \
                   -f target_owner="${TARGET_OWNER}" \
                   -f target_repo="${TARGET_REPO}" \
                   -f pr_number="${pr_num}" \
                   -f max_iterations="5" \
-                  -f patch_mode="patch"
-                command="fix"
+                  -f patch_mode="$(node scripts/ops-policy.mjs patch-mode --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}")" >/dev/null
                 action_result="triggered agent-fix-loop.yml patch mode"
               else
-                command="fix"
                 action_result="no PR number found, skipped"
               fi
-            elif grep -Eiq '/ops[[:space:]]+help' <<< "${comment_body}"; then
-              jq -n '{
-                body: "Available ops commands:\n\n- `/ops audit` - trigger repo-audit.yml\n- `/ops baseline` - trigger repo-baseline-plan.yml\n- `/ops fix` - trigger agent-fix-loop.yml in patch mode for a PR thread\n- `/ops help` - show this command list"
-              }' > "${OUT}/help-comment.json"
-              post_comment "${OUT}/help-comment.json" > "${RAW}/help-comment-response.json"
-              command="help"
+            elif [[ "${command}" == "finalize" || "${command}" == "merge" || "${command}" == "auto-merge" ]]; then
+              if [[ -n "${pr_num}" ]]; then
+                requested="${command//-/_}"
+                dispatch_finalize "${pr_num}" "${requested}"
+                action_result="triggered ops-pr-finalize.yml ${requested}"
+              else
+                action_result="no PR number found, skipped"
+              fi
+            elif [[ "${command}" == "release" ]]; then
+              if [[ -n "${pr_num}" ]]; then
+                dispatch_finalize "${pr_num}" "release"
+                action_result="triggered ops-pr-finalize.yml release path"
+              else
+                dispatch_release_orchestrator "release"
+                action_result="triggered ops-release-orchestrator.yml release"
+              fi
+            elif [[ "${command}" == "publish" ]]; then
+              dispatch_release_orchestrator "publish"
+              action_result="triggered ops-release-orchestrator.yml publish"
+            elif [[ "${command}" == "release-publish" ]]; then
+              dispatch_release_orchestrator "release_and_publish"
+              action_result="triggered ops-release-orchestrator.yml release_and_publish"
+            elif [[ "${command}" == "pause" ]]; then
+              ensure_label "${pause_label}" "ededed" "Ops automation is paused for this issue or PR."
+              api --method POST "repos/${REPO}/issues/${ISSUE_NUMBER}/labels" -f labels[]="${pause_label}" >/dev/null
+              post_body "Ops automation paused for this thread."
+              action_result="added ${pause_label}"
+            elif [[ "${command}" == "resume" ]]; then
+              api --method DELETE "repos/${REPO}/issues/${ISSUE_NUMBER}/labels/${pause_label}" >/dev/null 2>&1 || true
+              post_body "Ops automation resumed for this thread."
+              action_result="removed ${pause_label}"
+            elif [[ "${command}" == "policy" ]]; then
+              profile="$(jq -r '.autonomy.profile' "${OUT}/policy.json")"
+              pr_merge="$(jq -r '.pr.merge' "${OUT}/policy.json")"
+              release_enabled="$(jq -r '.release.enabled' "${OUT}/policy.json")"
+              publish_enabled="$(jq -r '.publish.enabled' "${OUT}/policy.json")"
+              post_body "**Effective ops policy**\n\n- Profile: \`${profile}\`\n- PR merge: \`${pr_merge}\`\n- Release enabled: \`${release_enabled}\`\n- Publish enabled: \`${publish_enabled}\`"
+              action_result="posted policy summary"
+            elif [[ "${command}" == "help" ]]; then
+              profile="$(jq -r '.autonomy.profile' "${OUT}/policy.json")"
+              post_body "Available ops commands:\n\n- \`/ops audit\`\n- \`/ops baseline\`\n- \`/ops fix\`\n- \`/ops finalize\`\n- \`/ops merge\`\n- \`/ops auto-merge\`\n- \`/ops release\`\n- \`/ops publish\`\n- \`/ops release-publish\`\n- \`/ops pause\`\n- \`/ops resume\`\n- \`/ops policy\`\n- \`/ops help\`\n\nCurrent autonomy profile: \`${profile}\`"
               action_result="posted help"
             fi
 

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Repository Autonomy Policy",
+  "type": "object",
+  "required": ["version", "autonomy", "agent", "pr", "release", "publish", "rulesets", "ops", "safety"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "extends": { "type": "string" },
+    "autonomy": {
+      "type": "object",
+      "required": ["enabled", "profile"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "profile": { "type": "string", "enum": ["off", "suggest", "patch", "guarded", "full", "breakglass"] }
+      },
+      "additionalProperties": true
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "patch": { "type": "boolean" },
+        "patch_mode_on_check_run_failure": { "type": "string", "enum": ["auto", "suggest", "patch"] },
+        "suggest_on_unclassified_failure": { "type": "boolean" },
+        "max_iterations": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "rollback_on_regression": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "pr": {
+      "type": "object",
+      "properties": {
+        "finalize": { "type": "boolean" },
+        "merge": { "type": "boolean" },
+        "merge_method": { "type": "string", "enum": ["merge", "squash", "rebase"] },
+        "delete_branch": { "type": "boolean" },
+        "require_clean_checks": { "type": "boolean" },
+        "require_zero_pending_checks": { "type": "boolean" },
+        "require_zero_unresolved_threads": { "type": "boolean" },
+        "require_mergeable": { "type": "boolean" },
+        "require_human_review": { "type": "boolean" },
+        "allow_bot_review": { "type": "boolean" },
+        "allow_review_dismissal": { "type": "boolean" },
+        "allow_auto_merge": { "type": "boolean" },
+        "allow_immediate_merge": { "type": "boolean" },
+        "allow_bypass_ruleset": { "type": "boolean" },
+        "require_expected_head_sha": { "type": "boolean" },
+        "allow_fork_head": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "release": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "trigger_after_merge": { "type": "boolean" },
+        "release_please": { "type": "boolean" },
+        "merge_release_pr": { "type": "boolean" },
+        "create_github_release": { "type": "boolean" },
+        "require_release_plan_clean": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "publish": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "npm": { "type": "boolean" },
+        "ghcr": { "type": "boolean" },
+        "dockerhub": { "type": "boolean" },
+        "vscode_marketplace": { "type": "boolean" },
+        "open_vsx": { "type": "boolean" },
+        "mcp_registry": { "type": "boolean" },
+        "require_environment": { "type": "string" },
+        "require_tag_pattern": { "type": "string" },
+        "trusted_publishing_only": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

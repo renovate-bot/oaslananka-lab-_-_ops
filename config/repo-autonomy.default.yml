@@ -1,0 +1,68 @@
+version: 1
+
+autonomy:
+  enabled: true
+  profile: guarded
+
+agent:
+  patch: true
+  patch_mode_on_check_run_failure: auto
+  suggest_on_unclassified_failure: true
+  max_iterations: 10
+  rollback_on_regression: true
+
+pr:
+  finalize: true
+  merge: false
+  merge_method: squash
+  delete_branch: true
+  require_clean_checks: true
+  require_zero_pending_checks: true
+  require_zero_unresolved_threads: true
+  require_mergeable: true
+  require_human_review: true
+  allow_bot_review: false
+  allow_review_dismissal: false
+  allow_auto_merge: true
+  allow_immediate_merge: false
+  allow_bypass_ruleset: false
+  require_expected_head_sha: true
+  allow_fork_head: false
+
+release:
+  enabled: false
+  trigger_after_merge: false
+  release_please: true
+  merge_release_pr: false
+  create_github_release: false
+  require_release_plan_clean: true
+
+publish:
+  enabled: false
+  npm: false
+  ghcr: false
+  dockerhub: false
+  vscode_marketplace: false
+  open_vsx: false
+  mcp_registry: false
+  require_environment: production
+  require_tag_pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+  trusted_publishing_only: true
+
+rulesets:
+  audit: true
+  require_app_bypass_for_full: true
+  expected_bypass_actor: oaslananka-repo-ops
+
+ops:
+  pause_label: ops-paused
+  managed_by_label: repo-ops
+  final_report_path: docs/control-plane-completion-report.md
+
+safety:
+  forbid_force_push: true
+  forbid_default_branch_direct_push: true
+  forbid_secret_printing: true
+  forbid_release_from_dirty_tree: true
+  forbid_publish_from_pr_head: true
+  require_main_after_merge: true

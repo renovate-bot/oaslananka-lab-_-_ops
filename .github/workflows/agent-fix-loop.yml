@@ -46,6 +46,11 @@ jobs:
       GCM_INTERACTIVE: Never
 
     steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
       - name: Create GitHub App token
         id: app
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
@@ -373,8 +378,15 @@ jobs:
 
           max_iterations="$(normalize_max_iterations "${MAX_ITERATIONS}")"
           patch_mode="${PATCH_MODE}"
-          if [[ "${patch_mode}" != "patch" && "${patch_mode}" != "suggest" ]]; then
-            patch_mode="patch"
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
+          policy_patch_mode="$(node scripts/ops-policy.mjs patch-mode --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}")"
+          if [[ "${patch_mode}" == "auto" ]]; then
+            patch_mode="${policy_patch_mode}"
+          elif [[ "${patch_mode}" != "patch" && "${patch_mode}" != "suggest" ]]; then
+            patch_mode="${policy_patch_mode}"
+          fi
+          if [[ "${patch_mode}" == "patch" && "${policy_patch_mode}" != "patch" ]]; then
+            patch_mode="suggest"
           fi
 
           target_api --method GET "repos/${REPO}/pulls/${PR_NUMBER}" > "${OUT}/pr-api.json"
@@ -449,9 +461,42 @@ jobs:
             fi
 
             if diagnostics_clean "${failing}" "${pending}" "${failed_runs}" "${unresolved}"; then
-              post_comment_text "PR is clean. Ready for human merge review. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
-              append_iteration_log "${iteration}" "${run_id}" "${classification}" "clean" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
-              final_state="clean"
+              current_head_sha="$(jq -r '.pr.headRefOid // ""' "${diagnostics_file}")"
+              if [[ "$(jq -r '.autonomy.enabled' "${OUT}/policy.json")" != "true" ]]; then
+                post_comment_text "**Agent fix loop clean**\n\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Finalize: disabled by repository policy"
+                append_iteration_log "${iteration}" "${run_id}" "${classification}" "policy_disabled" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+                final_state="policy_disabled"
+              elif [[ "$(jq -r '.pr.finalize' "${OUT}/policy.json")" == "true" ]]; then
+                finalize_body="${OUT}/finalize-dispatch-${iteration}.json"
+                finalize_response="${OUT}/finalize-dispatch-${iteration}-response.json"
+                jq -n \
+                  --arg target_owner "${TARGET_OWNER}" \
+                  --arg target_repo "${TARGET_REPO}" \
+                  --arg pr_number "${PR_NUMBER}" \
+                  --arg expected_head_sha "${current_head_sha}" \
+                  '{
+                    ref: "main",
+                    inputs: {
+                      target_owner: $target_owner,
+                      target_repo: $target_repo,
+                      pr_number: $pr_number,
+                      requested_action: "finalize",
+                      expected_head_sha: $expected_head_sha,
+                      dry_run: "false"
+                    }
+                  }' > "${finalize_body}"
+                ops_api --method POST \
+                  "repos/${OPS_REPO}/actions/workflows/ops-pr-finalize.yml/dispatches" \
+                  --input "${finalize_body}" > "${finalize_response}"
+                finalize_run_id="$(jq -r '.workflow_run_id // .id // empty' "${finalize_response}")"
+                post_comment_text "**Agent fix loop clean**\n\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Finalize: dispatched \`ops-pr-finalize.yml\`${finalize_run_id:+\n- Finalize run: https://github.com/${OPS_REPO}/actions/runs/${finalize_run_id}}"
+                append_iteration_log "${iteration}" "${run_id}" "${classification}" "clean_finalize_dispatched" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+                final_state="clean_finalize_dispatched"
+              else
+                post_comment_text "**Agent fix loop clean**\n\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Finalize: disabled by repository policy"
+                append_iteration_log "${iteration}" "${run_id}" "${classification}" "clean_finalize_disabled" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+                final_state="clean_finalize_disabled"
+              fi
               break
             fi
 

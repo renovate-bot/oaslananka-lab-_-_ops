@@ -1,0 +1,29 @@
+version: 1
+extends: ../../repo-autonomy.default.yml
+
+autonomy:
+  enabled: true
+  profile: full
+
+agent:
+  patch: true
+  patch_mode_on_check_run_failure: auto
+  max_iterations: 5
+
+pr:
+  finalize: true
+  merge: true
+  merge_method: squash
+  delete_branch: true
+  require_human_review: false
+  allow_bot_review: true
+  allow_auto_merge: true
+  allow_immediate_merge: true
+  allow_bypass_ruleset: true
+
+release:
+  enabled: false
+  trigger_after_merge: false
+
+publish:
+  enabled: false

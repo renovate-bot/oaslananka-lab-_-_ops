@@ -1,0 +1,42 @@
+version: 1
+extends: ../../repo-autonomy.default.yml
+
+autonomy:
+  enabled: true
+  profile: full
+
+agent:
+  patch: true
+  patch_mode_on_check_run_failure: auto
+  max_iterations: 10
+  rollback_on_regression: true
+
+pr:
+  finalize: true
+  merge: true
+  merge_method: squash
+  delete_branch: true
+  require_clean_checks: true
+  require_zero_pending_checks: true
+  require_zero_unresolved_threads: true
+  require_mergeable: true
+  require_human_review: false
+  allow_bot_review: true
+  allow_auto_merge: true
+  allow_immediate_merge: true
+  allow_bypass_ruleset: true
+  require_expected_head_sha: true
+
+release:
+  enabled: true
+  trigger_after_merge: true
+  release_please: true
+  merge_release_pr: false
+  create_github_release: false
+  require_release_plan_clean: true
+
+publish:
+  enabled: false
+  vscode_marketplace: false
+  open_vsx: false
+  require_environment: production

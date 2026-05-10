@@ -317,3 +317,22 @@ Skipped:
   - Auto-merge and production publish.
 
 Next: Add a proper `COPILOT_GITHUB_TOKEN` secret for gh-aw runtime, intentionally re-enable the required gh-aw event triggers, then switch Render `CHECK_RUN_WORKFLOW` to `ci-doctor.lock.yml` and re-test failed-check routing.
+
+## 2026-05-10 - policy-controlled lifecycle autonomy implementation
+
+Completed: pending remote validation
+
+Applied:
+  - Added repository autonomy policy files under `config/`.
+  - Added deterministic policy resolver and tests in `scripts/ops-policy.mjs` and `tests/ops-policy.test.mjs`.
+  - Added `ops-pr-finalize.yml` as the expected-head-SHA merge/finalization authority.
+  - Added `ops-release-orchestrator.yml` for release and publish-policy orchestration.
+  - Added `repo-ruleset-autonomy-audit.yml` for ruleset/settings compatibility checks.
+  - Updated `agent-fix-loop.yml` so clean diagnostics dispatch `ops-pr-finalize.yml` when policy permits.
+  - Expanded `inbox-handler.yml` with `/ops finalize`, `/ops merge`, `/ops auto-merge`, `/ops release`, `/ops publish`, `/ops release-publish`, `/ops pause`, `/ops resume`, `/ops policy`, and `/ops help`.
+  - Updated webhook routing so failed `check_run` events resolve repo policy and choose patch/suggest mode without Copilot.
+
+Skipped:
+  - gh-aw automatic triggers remain disabled; Copilot is optional and not part of the required lifecycle path.
+
+Next: Push workflows, run ruleset autonomy audits, dry-run finalization, then finalize open PRs according to policy.

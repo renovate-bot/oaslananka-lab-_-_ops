@@ -1,0 +1,450 @@
+name: Ops PR Finalize
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      requested_action:
+        required: true
+        default: finalize
+        type: choice
+        options:
+          - finalize
+          - merge
+          - auto_merge
+          - release
+          - publish
+      expected_head_sha:
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: ops-pr-finalize-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+      GCM_INTERACTIVE: Never
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Create target GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Finalize pull request
+        env:
+          TARGET_TOKEN: ${{ steps.app.outputs.token }}
+          OPS_TOKEN: ${{ github.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REQUESTED_ACTION: ${{ inputs.requested_action }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${TARGET_OWNER}/${TARGET_REPO}"
+          OUT="${GITHUB_WORKSPACE}/out"
+          RAW="${OUT}/raw"
+          mkdir -p "${RAW}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/pr-finalize-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}.json"
+          : > "${STEPS}"
+
+          final_state="diagnostics_failed"
+          diagnostics_run_id=""
+          audit_run_id=""
+          release_plan_run_id=""
+          release_orchestrator_run_id=""
+          merge_commit_sha=""
+          head_ref=""
+          head_sha_before=""
+          head_sha_at_merge=""
+          merge_method=""
+
+          target_api() {
+            GH_TOKEN="${TARGET_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_api() {
+            GH_TOKEN="${OPS_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_gh() {
+            GH_TOKEN="${OPS_TOKEN}" gh "$@"
+          }
+
+          target_gh() {
+            GH_TOKEN="${TARGET_TOKEN}" gh "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          write_report() {
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg target "${REPO}" \
+              --arg pr_number "${PR_NUMBER}" \
+              --arg requested_action "${REQUESTED_ACTION}" \
+              --argjson dry_run "$(if [[ "${DRY_RUN}" == "true" ]]; then echo true; else echo false; fi)" \
+              --arg policy_profile "$(jq -r '.autonomy.profile // "unknown"' "${OUT}/policy.json" 2>/dev/null || echo unknown)" \
+              --arg head_ref "${head_ref}" \
+              --arg head_sha_before "${head_sha_before}" \
+              --arg head_sha_at_merge "${head_sha_at_merge}" \
+              --arg merge_method "${merge_method}" \
+              --arg merge_commit_sha "${merge_commit_sha}" \
+              --arg diagnostics_run_id "${diagnostics_run_id}" \
+              --arg audit_run_id "${audit_run_id}" \
+              --arg release_plan_run_id "${release_plan_run_id}" \
+              --arg release_orchestrator_run_id "${release_orchestrator_run_id}" \
+              --arg final_state "${final_state}" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{
+                generated_at: $generated_at,
+                target: $target,
+                pr_number: ($pr_number|tonumber),
+                requested_action: $requested_action,
+                dry_run: $dry_run,
+                policy_profile: $policy_profile,
+                head_ref: $head_ref,
+                head_sha_before: $head_sha_before,
+                head_sha_at_merge: $head_sha_at_merge,
+                merge_method: $merge_method,
+                merge_commit_sha: $merge_commit_sha,
+                diagnostics_run_id: (if $diagnostics_run_id == "" then null else ($diagnostics_run_id|tonumber) end),
+                audit_run_id: (if $audit_run_id == "" then null else ($audit_run_id|tonumber) end),
+                release_plan_run_id: (if $release_plan_run_id == "" then null else ($release_plan_run_id|tonumber) end),
+                release_orchestrator_run_id: (if $release_orchestrator_run_id == "" then null else ($release_orchestrator_run_id|tonumber) end),
+                final_state: $final_state,
+                steps: $steps[0]
+              }' > "${REPORT}"
+          }
+
+          finish() {
+            write_report
+          }
+          trap finish EXIT
+
+          dispatch_ops_workflow() {
+            local workflow="$1"
+            local body_file="${RAW}/dispatch-${workflow}.json"
+            local response_file="${RAW}/dispatch-${workflow}.json.response"
+            shift
+            jq -n --arg ref "main" '{ref:$ref,inputs:{}}' > "${body_file}"
+            while [[ "$#" -gt 0 ]]; do
+              local key="$1"
+              local value="$2"
+              local next="${body_file}.next"
+              jq --arg key "${key}" --arg value "${value}" '.inputs += {($key): $value}' "${body_file}" > "${next}"
+              mv "${next}" "${body_file}"
+              shift 2
+            done
+            ops_api --method POST "repos/${OPS_REPO}/actions/workflows/${workflow}/dispatches" \
+              --input "${body_file}" > "${response_file}"
+            local run_id
+            run_id="$(jq -r '.workflow_run_id // .id // empty' "${response_file}")"
+            if [[ -z "${run_id}" ]]; then
+              sleep 8
+              run_id="$(ops_gh run list --repo "${OPS_REPO}" --workflow "${workflow}" --limit 10 --json databaseId,createdAt |
+                jq -r '.[0].databaseId // empty')"
+            fi
+            if [[ -z "${run_id}" ]]; then
+              return 1
+            fi
+            echo "${run_id}"
+          }
+
+          wait_ops_run() {
+            local run_id="$1"
+            ops_gh run watch "${run_id}" --repo "${OPS_REPO}" --exit-status
+          }
+
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
+          node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
+          record "policy" "loaded" "${REPO}"
+
+          if [[ "$(jq -r '.autonomy.enabled' "${OUT}/policy.json")" != "true" ]]; then
+            final_state="policy_disabled"
+            record "policy" "disabled" "autonomy.enabled=false"
+            exit 0
+          fi
+
+          target_api --method GET "repos/${REPO}" > "${RAW}/repo.json"
+          default_branch="$(jq -r '.default_branch // "main"' "${RAW}/repo.json")"
+          merge_method="$(jq -r '.pr.merge_method // "squash"' "${OUT}/policy.json")"
+
+          target_api --method GET "repos/${REPO}/pulls/${PR_NUMBER}" > "${RAW}/pr.json"
+          pr_state="$(jq -r '.state // ""' "${RAW}/pr.json")"
+          pr_merged="$(jq -r '.merged // false' "${RAW}/pr.json")"
+          draft="$(jq -r '.draft // false' "${RAW}/pr.json")"
+          head_ref="$(jq -r '.head.ref // ""' "${RAW}/pr.json")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' "${RAW}/pr.json")"
+          head_sha_before="$(jq -r '.head.sha // ""' "${RAW}/pr.json")"
+          head_sha_at_merge="${head_sha_before}"
+          base_ref="$(jq -r '.base.ref // ""' "${RAW}/pr.json")"
+          mergeable="$(jq -r '.mergeable // empty' "${RAW}/pr.json")"
+          pr_title="$(jq -r '.title // "Merge pull request"' "${RAW}/pr.json")"
+
+          if [[ "${pr_merged}" == "true" ]]; then
+            merge_commit_sha="$(jq -r '.merge_commit_sha // ""' "${RAW}/pr.json")"
+            record "pr" "already_merged" "merge_commit_sha=${merge_commit_sha}"
+          elif [[ "${pr_state}" != "open" ]]; then
+            final_state="not_mergeable"
+            record "pr" "not_open" "state=${pr_state}"
+            exit 0
+          fi
+
+          if [[ "${pr_merged}" != "true" ]]; then
+            if [[ "${draft}" == "true" && "${REQUESTED_ACTION}" != "release" && "${REQUESTED_ACTION}" != "publish" ]]; then
+              final_state="not_mergeable"
+              record "pr" "draft" "draft PR cannot be merged"
+              exit 0
+            fi
+            if [[ "$(jq -r '.pr.allow_fork_head' "${OUT}/policy.json")" != "true" && "${head_repo}" != "${REPO}" ]]; then
+              final_state="unsafe_head_branch"
+              record "head" "unsafe" "head_repo=${head_repo}"
+              exit 0
+            fi
+            if [[ "${head_ref}" == "${default_branch}" || "${head_ref}" == "${base_ref}" ]]; then
+              final_state="unsafe_head_branch"
+              record "head" "unsafe" "head_ref=${head_ref}"
+              exit 0
+            fi
+            if [[ -n "${EXPECTED_HEAD_SHA}" && "${EXPECTED_HEAD_SHA}" != "${head_sha_before}" ]]; then
+              final_state="head_sha_mismatch"
+              record "head" "mismatch" "expected=${EXPECTED_HEAD_SHA} actual=${head_sha_before}"
+              exit 0
+            fi
+            if [[ "$(jq -r '.pr.require_mergeable' "${OUT}/policy.json")" == "true" && "${mergeable}" == "false" ]]; then
+              final_state="not_mergeable"
+              record "mergeable" "false" "mergeable=false"
+              exit 0
+            fi
+          fi
+
+          if [[ "${pr_merged}" != "true" ]]; then
+            diagnostics_run_id="$(dispatch_ops_workflow agent-pr-diagnostics.yml \
+              target_owner "${TARGET_OWNER}" \
+              target_repo "${TARGET_REPO}" \
+              pr_number "${PR_NUMBER}")" || {
+                final_state="diagnostics_failed"
+                record "diagnostics" "dispatch_failed" "agent-pr-diagnostics.yml"
+                exit 0
+              }
+            wait_ops_run "${diagnostics_run_id}" || {
+              final_state="diagnostics_failed"
+              record "diagnostics" "failed" "run_id=${diagnostics_run_id}"
+              exit 0
+            }
+            mkdir -p "${OUT}/diagnostics"
+            ops_gh run download "${diagnostics_run_id}" --repo "${OPS_REPO}" --name "agent-pr-diagnostics-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}" --dir "${OUT}/diagnostics"
+            diagnostics_file="${OUT}/diagnostics/diagnostics.json"
+            failing="$(jq -r '.check_summary.failing // 0' "${diagnostics_file}")"
+            pending="$(jq -r '.check_summary.pending // 0' "${diagnostics_file}")"
+            failed_runs="$(jq -r '.run_summary.failures // 0' "${diagnostics_file}")"
+            unresolved="$(jq -r '.unresolved_review_threads | length' "${diagnostics_file}")"
+            review_decision="$(jq -r '.pr.reviewDecision // ""' "${diagnostics_file}")"
+            record "diagnostics" "success" "run_id=${diagnostics_run_id}"
+
+            if [[ "$(jq -r '.pr.require_clean_checks' "${OUT}/policy.json")" == "true" && ("${failing}" -ne 0 || "${failed_runs}" -ne 0) ]]; then
+              final_state="checks_not_clean"
+              record "checks" "not_clean" "failing=${failing} failed_runs=${failed_runs}"
+              exit 0
+            fi
+            if [[ "$(jq -r '.pr.require_zero_pending_checks' "${OUT}/policy.json")" == "true" && "${pending}" -ne 0 ]]; then
+              final_state="pending_checks"
+              record "checks" "pending" "pending=${pending}"
+              exit 0
+            fi
+            if [[ "$(jq -r '.pr.require_zero_unresolved_threads' "${OUT}/policy.json")" == "true" && "${unresolved}" -ne 0 ]]; then
+              final_state="unresolved_review_threads"
+              record "review_threads" "unresolved" "count=${unresolved}"
+              exit 0
+            fi
+            if [[ "${review_decision}" == "CHANGES_REQUESTED" ]]; then
+              final_state="review_changes_requested"
+              record "review" "changes_requested" "reviewDecision=${review_decision}"
+              exit 0
+            fi
+            if [[ "$(jq -r '.pr.require_human_review' "${OUT}/policy.json")" == "true" && "${review_decision}" != "APPROVED" ]]; then
+              final_state="review_required"
+              record "review" "required" "reviewDecision=${review_decision}"
+              exit 0
+            fi
+          fi
+
+          if [[ "${REQUESTED_ACTION}" == "publish" ]]; then
+            final_state="merged_release_disabled"
+            record "publish" "delegated_to_release_orchestrator" "use ops-release-orchestrator.yml"
+            exit 0
+          fi
+
+          if [[ "${pr_merged}" != "true" ]]; then
+            if [[ "$(jq -r '.pr.merge' "${OUT}/policy.json")" != "true" ]]; then
+              final_state="clean_merge_disabled"
+              record "merge" "disabled" "policy pr.merge=false"
+              exit 0
+            fi
+            if [[ "${DRY_RUN}" == "true" ]]; then
+              final_state="dry_run_clean"
+              record "dry_run" "clean" "merge skipped"
+              exit 0
+            fi
+
+            if [[ "${REQUESTED_ACTION}" == "auto_merge" || "$(jq -r '.pr.allow_immediate_merge' "${OUT}/policy.json")" != "true" ]]; then
+              if [[ "$(jq -r '.pr.allow_auto_merge' "${OUT}/policy.json")" == "true" ]]; then
+                target_gh pr merge "${PR_NUMBER}" --repo "${REPO}" --auto "--${merge_method}" --match-head-commit "${head_sha_before}" || {
+                  final_state="merge_failed"
+                  record "auto_merge" "failed" "gh pr merge --auto"
+                  exit 0
+                }
+                final_state="auto_merge_enabled"
+                record "auto_merge" "enabled" "head_sha=${head_sha_before}"
+                exit 0
+              fi
+              final_state="clean_merge_disabled"
+              record "merge" "disabled" "immediate and auto merge disabled"
+              exit 0
+            fi
+
+            merge_body="${RAW}/merge-body.json"
+            jq -n \
+              --arg merge_method "${merge_method}" \
+              --arg sha "${head_sha_before}" \
+              --arg commit_title "${pr_title}" \
+              --arg commit_message "Squash merge via _ops policy-controlled finalization." \
+              '{merge_method:$merge_method,sha:$sha,commit_title:$commit_title,commit_message:$commit_message}' > "${merge_body}"
+            if target_api --method PUT "repos/${REPO}/pulls/${PR_NUMBER}/merge" --input "${merge_body}" > "${RAW}/merge.json" 2> "${RAW}/merge.err"; then
+              if [[ "$(jq -r '.merged // false' "${RAW}/merge.json")" == "true" ]]; then
+                merge_commit_sha="$(jq -r '.sha // ""' "${RAW}/merge.json")"
+                head_sha_at_merge="${head_sha_before}"
+                final_state="merged"
+                record "merge" "merged" "sha=${merge_commit_sha}"
+              else
+                final_state="merge_failed"
+                record "merge" "not_merged" "$(jq -r '.message // "unknown"' "${RAW}/merge.json")"
+                exit 0
+              fi
+            else
+              final_state="merge_failed"
+              record "merge" "failed" "$(cat "${RAW}/merge.err")"
+              exit 0
+            fi
+
+            if [[ "$(jq -r '.pr.delete_branch' "${OUT}/policy.json")" == "true" && "${head_repo}" == "${REPO}" && "${head_ref}" != "${default_branch}" ]]; then
+              target_api --method DELETE "repos/${REPO}/git/refs/heads/${head_ref}" >/dev/null 2>&1 || true
+              record "head_branch" "delete_attempted" "${head_ref}"
+            fi
+          fi
+
+          audit_run_id="$(dispatch_ops_workflow repo-audit.yml target_owner "${TARGET_OWNER}" target_repo "${TARGET_REPO}")" || {
+            final_state="post_merge_audit_failed"
+            record "audit" "dispatch_failed" "repo-audit.yml"
+            exit 0
+          }
+          if ! wait_ops_run "${audit_run_id}"; then
+            final_state="post_merge_audit_failed"
+            record "audit" "failed" "run_id=${audit_run_id}"
+            exit 0
+          fi
+          record "audit" "success" "run_id=${audit_run_id}"
+
+          release_plan_run_id="$(dispatch_ops_workflow repo-release-plan.yml target_owner "${TARGET_OWNER}" target_repo "${TARGET_REPO}")" || {
+            final_state="post_merge_release_plan_failed"
+            record "release_plan" "dispatch_failed" "repo-release-plan.yml"
+            exit 0
+          }
+          if ! wait_ops_run "${release_plan_run_id}"; then
+            final_state="post_merge_release_plan_failed"
+            record "release_plan" "failed" "run_id=${release_plan_run_id}"
+            exit 0
+          fi
+          record "release_plan" "success" "run_id=${release_plan_run_id}"
+
+          if [[ "$(jq -r '.release.enabled' "${OUT}/policy.json")" == "true" && "$(jq -r '.release.trigger_after_merge' "${OUT}/policy.json")" == "true" ]]; then
+            release_orchestrator_run_id="$(dispatch_ops_workflow ops-release-orchestrator.yml \
+              target_owner "${TARGET_OWNER}" \
+              target_repo "${TARGET_REPO}" \
+              source_pr "${PR_NUMBER}" \
+              merge_commit_sha "${merge_commit_sha}" \
+              requested_action "release" \
+              dry_run "false")" || {
+                final_state="release_orchestrator_failed"
+                record "release_orchestrator" "dispatch_failed" "ops-release-orchestrator.yml"
+                exit 0
+              }
+            final_state="merged_release_dispatched"
+            record "release_orchestrator" "dispatched" "run_id=${release_orchestrator_run_id}"
+          else
+            final_state="merged_release_disabled"
+            record "release" "disabled" "policy release trigger disabled"
+          fi
+
+          {
+            echo "### Ops PR Finalize"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${REPO} |"
+            echo "| PR | #${PR_NUMBER} |"
+            echo "| Requested action | ${REQUESTED_ACTION} |"
+            echo "| Dry run | ${DRY_RUN} |"
+            echo "| Final state | ${final_state} |"
+            echo "| Merge commit | ${merge_commit_sha:-none} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload finalize report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr-finalize-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.pr_number }}
+          path: out/
+          retention-days: 14

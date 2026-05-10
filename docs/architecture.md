@@ -177,6 +177,31 @@ The webhook ignores `_ops` repository events by default through `IGNORED_ORG_REP
 
 For failed `check_run` events, the webhook checks the associated pull request before dispatch. Closed PRs are ignored so temporary smoke-test PRs do not create stale auto-fix runs after cleanup.
 
+## Policy-Controlled Lifecycle
+
+The deterministic lifecycle path does not depend on Copilot or gh-aw.
+
+```text
+event or /ops command
+-> policy resolution
+-> diagnose
+-> patch when policy permits
+-> finalize when policy permits
+-> merge when policy permits and gates pass
+-> post-merge audit and release plan
+-> release orchestration when release policy permits
+-> publish orchestration only when publish.enabled=true
+```
+
+Policy files live in:
+
+```text
+config/repo-autonomy.default.yml
+config/repos/<owner>/<repo>.yml
+```
+
+`ops-pr-finalize.yml` is the merge authority. It uses the target repository GitHub App token and merges with an expected head SHA. `ops-release-orchestrator.yml` handles release and publish policy after merge. `repo-ruleset-autonomy-audit.yml` checks whether GitHub rulesets/settings match the configured autonomy profile.
+
 ## Control-plane
 
 `oaslananka-lab/_ops` is the sole cross-repository automation authority.
