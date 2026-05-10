@@ -264,3 +264,24 @@ Skipped:
   - Bulk rollout beyond the named Group B pilot repositories.
 
 Next: Run `repo-multi-onboarding.yml` once from `_ops` main after this documentation/workflow commit is pushed, then continue with any explicitly approved production rollout.
+
+## 2026-05-10 - Group B multi-onboarding dispatch verified
+
+Completed: 2026-05-10T10:05:00+03:00
+
+Applied:
+  - Ran `repo-multi-onboarding.yml` from `_ops` main.
+  - Verified the matrix dispatch workflow completed successfully.
+  - Verified all three dispatched `repo-onboarding.yml` child runs completed successfully.
+
+Validation:
+  - Multi-onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25622469299
+  - Child onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25622470583
+  - Child onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25622470747
+  - Child onboarding: https://github.com/oaslananka-lab/_ops/actions/runs/25622470820
+
+Skipped:
+  - No additional repository rollout beyond Group B.
+  - No auto-merge or production publish.
+
+Next: Continue only with explicitly approved production rollout or maintenance PR merge actions.

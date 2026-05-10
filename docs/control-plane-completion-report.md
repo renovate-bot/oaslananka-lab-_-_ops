@@ -613,3 +613,13 @@ No auto-merge was performed.
 No strict reviewer/approval ruleset was enabled.
 No bulk rollout beyond Group B was performed.
 ```
+
+Post-commit multi-onboarding verification:
+
+```text
+repo-multi-onboarding.yml  https://github.com/oaslananka-lab/_ops/actions/runs/25622469299
+child onboarding           https://github.com/oaslananka-lab/_ops/actions/runs/25622470583
+child onboarding           https://github.com/oaslananka-lab/_ops/actions/runs/25622470747
+child onboarding           https://github.com/oaslananka-lab/_ops/actions/runs/25622470820
+result                     all success
+```
