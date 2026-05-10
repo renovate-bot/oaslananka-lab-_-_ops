@@ -1,6 +1,17 @@
 ---
 name: CI Doctor
 on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      pr_number:
+        required: false
+        type: string
   check_run:
     types:
       - completed
@@ -34,6 +45,13 @@ safe-outputs:
 # CI Doctor Agent
 
 When a CI workflow fails, diagnose the root cause and post a structured report.
+
+## Dispatch Inputs
+
+- Target repository: `{{inputs.target_owner}}/{{inputs.target_repo}}`
+- PR number: `{{inputs.pr_number}}`
+
+When invoked through `workflow_dispatch`, use these inputs to inspect the target repository and associated PR. When invoked directly by `check_run` or `workflow_run`, derive the repository and PR from the event payload.
 
 ## On Failure
 

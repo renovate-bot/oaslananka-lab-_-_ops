@@ -101,13 +101,11 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
                 pr_num = pr.get("number")
                 if pr_num:
                     return await dispatch(
-                        "agent-fix-loop.yml",
+                        "ci-doctor.lock.yml",
                         {
                             "target_owner": owner,
                             "target_repo": repo,
                             "pr_number": str(pr_num),
-                            "max_iterations": "3",
-                            "patch_mode": "suggest",
                         },
                     )
         return {"handled": False, "reason": "check_run not actionable", "conclusion": conclusion}
