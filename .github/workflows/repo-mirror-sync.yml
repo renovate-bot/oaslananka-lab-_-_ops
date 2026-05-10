@@ -178,6 +178,9 @@ jobs:
 
           source_sha="$(git rev-parse "origin/${default_branch}")"
           target_sha_before="$(git ls-remote target "refs/heads/${default_branch}" | awk '{print $1}' || true)"
+          if [[ -n "${target_sha_before}" ]]; then
+            git fetch target "refs/heads/${default_branch}:refs/remotes/target/${default_branch}"
+          fi
 
           if [[ -z "${target_sha_before}" ]]; then
             commits_synced="$(git rev-list --count "${source_sha}")"
@@ -191,7 +194,9 @@ jobs:
             status="up_to_date"
             record "default_branch" "up_to_date" "${default_branch}@${source_sha}"
           else
-            if [[ -n "${target_sha_before}" ]]; then
+            if [[ -n "${target_sha_before}" ]] && git merge-base --is-ancestor "${target_sha_before}" "${source_sha}"; then
+              git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+            elif [[ -n "${target_sha_before}" ]]; then
               git push --force-with-lease="refs/heads/${default_branch}:${target_sha_before}" \
                 target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
             else
