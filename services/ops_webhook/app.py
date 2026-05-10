@@ -21,6 +21,7 @@ PERSONAL_OWNER = os.getenv("PERSONAL_OWNER", "oaslananka")
 ORG_OWNER = os.getenv("ORG_OWNER", "oaslananka-lab")
 ROUTED_OWNERS = {PERSONAL_OWNER, ORG_OWNER}
 API_VERSION = os.getenv("GITHUB_API_VERSION", "2026-03-10")
+CHECK_RUN_WORKFLOW = os.getenv("CHECK_RUN_WORKFLOW", "agent-fix-loop.yml")
 
 PR_ACTIONS = {"opened", "synchronize", "reopened", "closed"}
 CHECK_RUN_FAILURES = {"failure", "timed_out"}
@@ -100,13 +101,16 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
             for pr in check_run.get("pull_requests") or []:
                 pr_num = pr.get("number")
                 if pr_num:
+                    inputs = {
+                        "target_owner": owner,
+                        "target_repo": repo,
+                        "pr_number": str(pr_num),
+                    }
+                    if CHECK_RUN_WORKFLOW == "agent-fix-loop.yml":
+                        inputs.update({"max_iterations": "3", "patch_mode": "suggest"})
                     return await dispatch(
-                        "ci-doctor.lock.yml",
-                        {
-                            "target_owner": owner,
-                            "target_repo": repo,
-                            "pr_number": str(pr_num),
-                        },
+                        CHECK_RUN_WORKFLOW,
+                        inputs,
                     )
         return {"handled": False, "reason": "check_run not actionable", "conclusion": conclusion}
 

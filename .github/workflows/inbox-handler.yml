@@ -236,20 +236,21 @@ jobs:
               fi
 
               if [[ -n "${pr_num}" ]]; then
-                trigger_ops_workflow pr-fix.lock.yml \
+                trigger_ops_workflow agent-fix-loop.yml \
                   -f target_owner="${TARGET_OWNER}" \
                   -f target_repo="${TARGET_REPO}" \
                   -f pr_number="${pr_num}" \
+                  -f max_iterations="5" \
                   -f patch_mode="patch"
                 command="fix"
-                action_result="triggered pr-fix.lock.yml patch mode"
+                action_result="triggered agent-fix-loop.yml patch mode"
               else
                 command="fix"
                 action_result="no PR number found, skipped"
               fi
             elif grep -Eiq '/ops[[:space:]]+help' <<< "${comment_body}"; then
               jq -n '{
-                body: "Available ops commands:\n\n- `/ops audit` - trigger repo-audit.yml\n- `/ops baseline` - trigger repo-baseline-plan.yml\n- `/ops fix` - trigger pr-fix.lock.yml in patch mode for a PR thread\n- `/ops help` - show this command list"
+                body: "Available ops commands:\n\n- `/ops audit` - trigger repo-audit.yml\n- `/ops baseline` - trigger repo-baseline-plan.yml\n- `/ops fix` - trigger agent-fix-loop.yml in patch mode for a PR thread\n- `/ops help` - show this command list"
               }' > "${OUT}/help-comment.json"
               post_comment "${OUT}/help-comment.json" > "${RAW}/help-comment-response.json"
               command="help"
