@@ -79,6 +79,27 @@ async def dispatch(workflow: str, inputs: dict[str, str]) -> dict[str, Any]:
     return result
 
 
+async def github_get(path: str) -> dict[str, Any] | None:
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        return None
+
+    url = f"https://api.github.com/{path.lstrip('/')}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": API_VERSION,
+    }
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(url, headers=headers)
+
+    if response.status_code != 200:
+        LOGGER.warning("GitHub GET %s returned %s", path, response.status_code)
+        return None
+    return response.json()
+
+
 def _repository_identity(payload: dict[str, Any]) -> tuple[str, str, str]:
     repository = payload.get("repository") or {}
     owner = (repository.get("owner") or {}).get("login") or ""
@@ -109,6 +130,15 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
             for pr in check_run.get("pull_requests") or []:
                 pr_num = pr.get("number")
                 if pr_num:
+                    pr_state = await github_get(f"repos/{owner}/{repo}/pulls/{pr_num}")
+                    if pr_state and pr_state.get("state") != "open":
+                        return {
+                            "handled": False,
+                            "reason": "pull request is not open",
+                            "owner": owner,
+                            "repo": repo,
+                            "pr_number": str(pr_num),
+                        }
                     inputs = {
                         "target_owner": owner,
                         "target_repo": repo,

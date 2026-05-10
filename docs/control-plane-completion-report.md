@@ -641,6 +641,7 @@ check_run routing   agent-fix-loop.yml by default
 comment rendering   escaped newline/tab sequences normalized before posting
 mirror-sync         fast-forward first, force-with-lease only for divergence
 webhook guard       oaslananka-lab/_ops ignored to prevent control-plane feedback loops
+check_run guard     closed pull requests are ignored before auto-fix dispatch
 ```
 
 Runtime constraint:

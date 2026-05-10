@@ -54,6 +54,7 @@ The repository also carries compiled GitHub Agentic Workflows:
 The gh-aw workflows are dispatch-only until the Copilot engine secret is configured. Automatic webhook routing currently stays on `agent-fix-loop.yml` by default because that deterministic workflow runs with the existing GitHub App credentials. Set `CHECK_RUN_WORKFLOW=ci-doctor.lock.yml` on the webhook runtime only after the gh-aw Copilot engine secret is configured and the `ci-doctor` lock workflow is intentionally recompiled with event triggers.
 
 The webhook ignores `_ops` repository events by default to avoid recursive control-plane repair loops.
+Failed `check_run` routing verifies that the associated pull request is still open before dispatching an auto-fix workflow.
 
 ## Onboard a Repository
 

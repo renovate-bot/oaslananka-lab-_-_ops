@@ -175,6 +175,8 @@ This keeps automatic check-run handling green while preserving gh-aw as the next
 
 The webhook ignores `_ops` repository events by default through `IGNORED_ORG_REPOS=_ops`. This prevents failed control-plane automation checks from recursively dispatching more control-plane repair workflows.
 
+For failed `check_run` events, the webhook checks the associated pull request before dispatch. Closed PRs are ignored so temporary smoke-test PRs do not create stale auto-fix runs after cleanup.
+
 ## Control-plane
 
 `oaslananka-lab/_ops` is the sole cross-repository automation authority.

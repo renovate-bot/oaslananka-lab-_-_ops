@@ -294,6 +294,7 @@ Applied:
   - Added compiled gh-aw workflows for `pr-fix`, `issue-triage`, and `ci-doctor`.
   - Recompiled `issue-triage` and `ci-doctor` as dispatch-only workflows so missing gh-aw runtime secrets do not create automatic red runs.
   - Added `_ops` to the webhook ignored organization repositories to prevent control-plane check-run feedback loops.
+  - Added an open-PR check before failed `check_run` auto-fix dispatch so closed smoke-test PRs do not trigger stale fix loops.
   - Validated gh-aw dry-run dispatch for `pr-fix`.
   - Confirmed gh-aw runtime currently requires `_ops` secret `COPILOT_GITHUB_TOKEN`; no substitute token was reused.
   - Kept webhook `check_run` routing on `agent-fix-loop.yml` by default so production routing remains green with existing GitHub App credentials.
