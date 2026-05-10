@@ -100,6 +100,8 @@ jobs:
           post_comment_text() {
             local text="$1"
             local body_file="${OUT}/comment-$(date +%s%N).json"
+            text="${text//\\n/$'\n'}"
+            text="${text//\\t/$'\t'}"
             jq -n --arg body "${text}" '{body:$body}' > "${body_file}"
             target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${body_file}" >/dev/null
           }
@@ -461,7 +463,7 @@ jobs:
 
             suggestion="$(suggestion_for_class "${classification}")"
             if [[ "${patch_mode}" == "suggest" ]]; then
-              post_comment_text "Agent fix loop suggestion mode. Classification: ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n\n${suggestion}"
+              post_comment_text "**Agent fix loop: suggestion mode**\n\n- Classification: \`${classification}\`\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n\n${suggestion}"
               append_iteration_log "${iteration}" "${run_id}" "${classification}" "suggested" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
               final_state="suggested"
               if [[ "${iteration}" -lt "${max_iterations}" ]]; then
@@ -478,7 +480,7 @@ jobs:
             set -e
 
             if [[ "${patch_status}" -eq 2 ]]; then
-              post_comment_text "Agent fix loop stopped: classification ${classification} is not safely auto-patchable by the current implementation. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n\n${suggestion}"
+              post_comment_text "**Agent fix loop stopped**\n\n- Classification: \`${classification}\`\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Reason: not safely auto-patchable by the current implementation\n\n${suggestion}"
               append_iteration_log "${iteration}" "${run_id}" "${classification}" "non_patchable" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
               final_state="non_patchable"
               break
