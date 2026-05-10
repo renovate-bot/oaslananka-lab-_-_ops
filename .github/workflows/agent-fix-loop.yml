@@ -1,4 +1,4 @@
-name: Agent Fix Loop
+name: Agent Fix Loop v2
 
 on:
   workflow_dispatch:
@@ -16,10 +16,18 @@ on:
         required: true
         type: string
       max_iterations:
-        description: Maximum diagnostic iterations
+        description: Maximum loop iterations
         required: true
-        default: "3"
+        default: "5"
         type: string
+      patch_mode:
+        description: "patch | suggest"
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - suggest
 
 permissions:
   contents: read
@@ -32,7 +40,10 @@ concurrency:
 jobs:
   fix-loop:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+      GCM_INTERACTIVE: Never
 
     steps:
       - name: Create GitHub App token
@@ -44,7 +55,7 @@ jobs:
           owner: ${{ inputs.target_owner }}
           repositories: ${{ inputs.target_repo }}
 
-      - name: Run diagnostic fix loop
+      - name: Run autonomous patch loop
         env:
           TARGET_TOKEN: ${{ steps.app.outputs.token }}
           OPS_TOKEN: ${{ github.token }}
@@ -52,6 +63,7 @@ jobs:
           TARGET_REPO: ${{ inputs.target_repo }}
           PR_NUMBER: ${{ inputs.pr_number }}
           MAX_ITERATIONS: ${{ inputs.max_iterations }}
+          PATCH_MODE: ${{ inputs.patch_mode }}
           API_VERSION: "2026-03-10"
           OPS_REPO: oaslananka-lab/_ops
         shell: bash
@@ -59,10 +71,12 @@ jobs:
           set -euo pipefail
 
           REPO="${TARGET_OWNER}/${TARGET_REPO}"
-          OUT="out"
-          mkdir -p "${OUT}/iterations"
+          OUT="${GITHUB_WORKSPACE}/out"
+          WORK="${RUNNER_TEMP}/agent-fix-loop"
           ITERATION_LOG="${OUT}/agent-fix-loop-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}.ndjson"
           REPORT="${OUT}/agent-fix-loop-${TARGET_OWNER}-${TARGET_REPO}-${PR_NUMBER}.json"
+
+          mkdir -p "${OUT}/iterations" "${WORK}"
           : > "${ITERATION_LOG}"
 
           target_api() {
@@ -76,80 +90,299 @@ jobs:
             GH_TOKEN="${OPS_TOKEN}" gh "$@"
           }
 
-          classify_logs() {
-            local log_dir="$1"
-            local combined="${OUT}/combined-failed-logs.txt"
-            find "${log_dir}" -type f -name '*.log' -print0 2>/dev/null | xargs -0 cat > "${combined}" 2>/dev/null || true
+          post_comment_text() {
+            local text="$1"
+            local body_file="${OUT}/comment-$(date +%s%N).json"
+            jq -n --arg body "${text}" '{body:$body}' > "${body_file}"
+            target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${body_file}" >/dev/null
+          }
 
-            if [[ ! -s "${combined}" ]]; then
-              echo "unknown"
-            elif grep -Eiq 'prettier|format:check|formatting|eslint|lint' "${combined}"; then
-              echo "format/lint"
-            elif grep -Eiq 'Invalid workflow file|YAMLException|workflow syntax|mapping values are not allowed|did not find expected' "${combined}"; then
-              echo "workflow syntax"
-            elif grep -Eiq 'Cannot find module|module not found|ERR_MODULE_NOT_FOUND|No such file or directory|command not found' "${combined}"; then
-              echo "missing dependency"
-            elif grep -Eiq 'AssertionError|FAIL|Test failed|failed tests|npm ERR! test|pnpm test' "${combined}"; then
-              echo "test failure"
+          normalize_max_iterations() {
+            local value="$1"
+            if [[ "${value}" =~ ^[0-9]+$ ]] && [[ "${value}" -ge 1 ]] && [[ "${value}" -le 10 ]]; then
+              echo "${value}"
             else
-              echo "unknown"
+              echo "5"
             fi
           }
 
-          suggested_fix() {
+          append_iteration_log() {
+            local iteration="$1"
+            local diagnostics_run_id="$2"
+            local classification="$3"
+            local action="$4"
+            local commit_sha="$5"
+            local failing="$6"
+            local pending="$7"
+            local failed_runs="$8"
+            local unresolved="$9"
+
+            jq -n \
+              --arg iteration "${iteration}" \
+              --arg diagnostics_run_id "${diagnostics_run_id}" \
+              --arg diagnostics_run_url "https://github.com/${OPS_REPO}/actions/runs/${diagnostics_run_id}" \
+              --arg classification "${classification}" \
+              --arg action "${action}" \
+              --arg commit_sha "${commit_sha}" \
+              --argjson failing "${failing}" \
+              --argjson pending "${pending}" \
+              --argjson failed_runs "${failed_runs}" \
+              --argjson unresolved_review_threads "${unresolved}" \
+              '{
+                iteration: ($iteration|tonumber),
+                diagnostics_run_id: ($diagnostics_run_id|tonumber),
+                diagnostics_run_url: $diagnostics_run_url,
+                classification: $classification,
+                action: $action,
+                commit_sha: (if $commit_sha == "" then null else $commit_sha end),
+                check_summary: {
+                  failing: $failing,
+                  pending: $pending
+                },
+                failed_runs: $failed_runs,
+                unresolved_review_threads: $unresolved_review_threads
+              }' >> "${ITERATION_LOG}"
+          }
+
+          combine_failed_logs() {
+            local artifact_dir="$1"
+            local combined="$2"
+            find "${artifact_dir}" -type f -path '*failed-run-logs/*.log' -print0 2>/dev/null |
+              xargs -0 cat > "${combined}" 2>/dev/null || true
+          }
+
+          has_review_suggestion() {
+            local threads_file="$1"
+            jq -e '
+              any(.[]?.comments.nodes[]?; (.body // "") | test("```suggestion"; "i"))
+            ' "${threads_file}" >/dev/null 2>&1
+          }
+
+          classify_failure() {
+            local artifact_dir="$1"
+            local diagnostics_file="$2"
+            local combined="${OUT}/combined-failed-logs.txt"
+            local threads_file
+            threads_file="$(find "${artifact_dir}" -name unresolved-review-threads.json -print -quit)"
+            combine_failed_logs "${artifact_dir}" "${combined}"
+
+            if [[ -n "${threads_file}" ]] && has_review_suggestion "${threads_file}"; then
+              echo "review-thread patch"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'trailing[[:space:]-]+whitespace|trailing spaces|whitespace check failed|CRLF|line endings' "${combined}"; then
+              echo "trailing whitespace"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'prettier|format:check|formatting|eslint|lint' "${combined}"; then
+              echo "format/lint"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'Invalid workflow file|YAMLException|workflow syntax|mapping values are not allowed|did not find expected|bad indentation' "${combined}"; then
+              echo "workflow syntax"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'Resource not accessible by integration|permission denied|permissions?:.*(write|read)|requires.*permission' "${combined}"; then
+              echo "simple permission"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'pin.*action|unpinned|deprecated action|Node.js 20 actions are deprecated|uses:.*@[vV]?[0-9]' "${combined}"; then
+              echo "action pin update"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'lockfile|frozen-lockfile|ERR_PNPM_OUTDATED_LOCKFILE|package-lock.json|pnpm-lock.yaml' "${combined}"; then
+              echo "missing lockfile"
+            elif jq -e '.run_summary.failures > 0 or .check_summary.failing > 0' "${diagnostics_file}" >/dev/null; then
+              echo "unknown"
+            else
+              echo "pending"
+            fi
+          }
+
+          suggestion_for_class() {
             local classification="$1"
             case "${classification}" in
               "format/lint")
-                printf '%s\n' \
-                  'Run the repository formatter/linter locally, commit only the resulting source changes, then push the same PR branch.' \
-                  '' \
-                  '```powershell' \
-                  'corepack enable' \
-                  'corepack pnpm install --frozen-lockfile' \
-                  'corepack pnpm run format' \
-                  'corepack pnpm run lint' \
-                  '```'
+                printf '%s\n' "Run the repository formatter/linter, commit only deterministic formatting or lint autofix output, then push the same PR branch."
                 ;;
               "workflow syntax")
-                printf '%s\n' \
-                  'Inspect the failed workflow YAML near the line reported in the log, fix the syntax, then run a local workflow linter before pushing.' \
-                  '' \
-                  '```powershell' \
-                  'actionlint .github/workflows/*.yml' \
-                  '```'
+                printf '%s\n' "Inspect the failed workflow line, fix only the syntax error, then validate with actionlint before pushing."
                 ;;
-              "missing dependency")
-                printf '%s\n' \
-                  'Install or restore the missing dependency using the repository package manager, commit the manifest and lockfile change together, then rerun checks.' \
-                  '' \
-                  '```powershell' \
-                  'corepack pnpm install --frozen-lockfile' \
-                  '```'
+              "simple permission")
+                printf '%s\n' "Add the smallest required permissions block to the affected workflow or job. Do not broaden repository permissions beyond the failed operation."
                 ;;
-              "test failure")
-                printf '%s\n' \
-                  'Reproduce the failing test locally, patch the smallest deterministic failure, and rerun the same test command before pushing.' \
-                  '' \
-                  '```powershell' \
-                  'corepack pnpm test' \
-                  '```'
+              "action pin update")
+                printf '%s\n' "Replace the deprecated or unpinned action reference with the current allowed pinned reference used by repository policy."
+                ;;
+              "review-thread patch")
+                printf '%s\n' "Apply only the one-line suggested change from the unresolved review thread, then rerun diagnostics."
+                ;;
+              "missing lockfile")
+                printf '%s\n' "Regenerate the lockfile with the repository package manager and commit the manifest plus lockfile together."
+                ;;
+              "trailing whitespace")
+                printf '%s\n' "Strip trailing whitespace and normalize line endings, then push the same PR branch."
+                ;;
+              "pending")
+                printf '%s\n' "Checks are still pending. Wait for current-head checks to complete before patching."
                 ;;
               *)
-                printf '%s\n' \
-                  'Open the diagnostics artifact and failed-run logs, identify the first deterministic current-head failure, and patch only that failure.'
+                printf '%s\n' "The failure is non-patchable by the v2 MVP. Inspect diagnostics and failed-run logs manually before changing code."
                 ;;
             esac
           }
 
-          post_pr_comment() {
-            local body_file="$1"
-            target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${body_file}" >/dev/null
+          clone_pr_branch() {
+            local head_ref="$1"
+            local dest="$2"
+            rm -rf "${dest}"
+            git clone --depth=1 --branch="${head_ref}" "https://x-access-token:${TARGET_TOKEN}@github.com/${REPO}.git" "${dest}" >/dev/null 2>&1
+            git -C "${dest}" config user.name "oaslananka-repo-ops[bot]"
+            git -C "${dest}" config user.email "oaslananka-repo-ops[bot]@users.noreply.github.com"
+            git -C "${dest}" config commit.gpgsign false
+            git -C "${dest}" config tag.gpgSign false
           }
 
-          max_iterations="${MAX_ITERATIONS}"
-          if ! [[ "${max_iterations}" =~ ^[0-9]+$ ]]; then
-            max_iterations="3"
+          strip_trailing_whitespace() {
+            local repo_dir="$1"
+            python - "${repo_dir}" <<'PY'
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+          skip_dirs = {".git", "node_modules", ".pnpm-store", "dist", "coverage", ".next"}
+          text_suffixes = {
+              ".c", ".cc", ".cpp", ".css", ".go", ".h", ".html", ".js", ".json", ".jsx",
+              ".mjs", ".md", ".py", ".sh", ".ts", ".tsx", ".txt", ".yml", ".yaml"
+          }
+
+          for path in root.rglob("*"):
+              if not path.is_file():
+                  continue
+              if any(part in skip_dirs for part in path.parts):
+                  continue
+              if path.suffix.lower() not in text_suffixes and path.name not in {"Taskfile.yml", "CODEOWNERS"}:
+                  continue
+              data = path.read_bytes()
+              if b"\x00" in data:
+                  continue
+              try:
+                  text = data.decode("utf-8")
+              except UnicodeDecodeError:
+                  continue
+              normalized = "\n".join(line.rstrip(" \t") for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+              if text.endswith(("\n", "\r\n", "\r")) and not normalized.endswith("\n"):
+                  normalized += "\n"
+              if normalized != text:
+                  path.write_text(normalized, encoding="utf-8", newline="\n")
+          PY
+          }
+
+          run_node_format_lint() {
+            local repo_dir="$1"
+            if [[ ! -f "${repo_dir}/package.json" ]]; then
+              return 0
+            fi
+            (
+              cd "${repo_dir}"
+              corepack enable || true
+              if [[ -f pnpm-lock.yaml ]]; then
+                corepack pnpm install --frozen-lockfile || true
+              fi
+              if jq -e '.scripts.format' package.json >/dev/null; then
+                corepack pnpm run format || true
+              fi
+              if jq -e '.scripts.lint' package.json >/dev/null; then
+                corepack pnpm run lint || true
+              fi
+            )
+          }
+
+          generate_lockfile_if_missing() {
+            local repo_dir="$1"
+            if [[ -f "${repo_dir}/package.json" && ! -f "${repo_dir}/pnpm-lock.yaml" ]]; then
+              (
+                cd "${repo_dir}"
+                corepack enable || true
+                corepack pnpm install --lockfile-only || true
+              )
+            fi
+          }
+
+          apply_patch_for_class() {
+            local classification="$1"
+            local repo_dir="$2"
+            case "${classification}" in
+              "format/lint")
+                strip_trailing_whitespace "${repo_dir}"
+                run_node_format_lint "${repo_dir}"
+                ;;
+              "trailing whitespace")
+                strip_trailing_whitespace "${repo_dir}"
+                ;;
+              "missing lockfile")
+                generate_lockfile_if_missing "${repo_dir}"
+                ;;
+              "workflow syntax"|"simple permission"|"action pin update"|"review-thread patch")
+                return 2
+                ;;
+              *)
+                return 2
+                ;;
+            esac
+          }
+
+          commit_and_push_if_changed() {
+            local repo_dir="$1"
+            local classification="$2"
+            local head_ref="$3"
+            if [[ -z "$(git -C "${repo_dir}" status --porcelain)" ]]; then
+              return 3
+            fi
+            git -C "${repo_dir}" add -A
+            git -C "${repo_dir}" -c commit.gpgsign=false commit --no-gpg-sign -m "fix: auto-patch ${classification} in ${head_ref}" >&2
+            local commit_sha
+            commit_sha="$(git -C "${repo_dir}" rev-parse HEAD)"
+            git -C "${repo_dir}" push origin "HEAD:${head_ref}" >&2
+            echo "${commit_sha}"
+          }
+
+          rollback_commit() {
+            local head_ref="$1"
+            local commit_sha="$2"
+            local dest="${WORK}/rollback"
+            clone_pr_branch "${head_ref}" "${dest}"
+            git -C "${dest}" revert --no-edit "${commit_sha}"
+            git -C "${dest}" push origin "HEAD:${head_ref}"
+          }
+
+          diagnostics_clean() {
+            local failing="$1"
+            local pending="$2"
+            local failed_runs="$3"
+            local unresolved="$4"
+            [[ "${failing}" -eq 0 && "${pending}" -eq 0 && "${failed_runs}" -eq 0 && "${unresolved}" -eq 0 ]]
+          }
+
+          is_worse_than_previous() {
+            local failing="$1"
+            local failed_runs="$2"
+            local unresolved="$3"
+            local prev_failing="$4"
+            local prev_failed_runs="$5"
+            local prev_unresolved="$6"
+            [[ "${failing}" -gt "${prev_failing}" || "${failed_runs}" -gt "${prev_failed_runs}" || "${unresolved}" -gt "${prev_unresolved}" ]]
+          }
+
+          max_iterations="$(normalize_max_iterations "${MAX_ITERATIONS}")"
+          patch_mode="${PATCH_MODE}"
+          if [[ "${patch_mode}" != "patch" && "${patch_mode}" != "suggest" ]]; then
+            patch_mode="patch"
           fi
+
+          target_api --method GET "repos/${REPO}/pulls/${PR_NUMBER}" > "${OUT}/pr-api.json"
+          head_ref="$(jq -r '.head.ref // ""' "${OUT}/pr-api.json")"
+          base_ref="$(jq -r '.base.ref // ""' "${OUT}/pr-api.json")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' "${OUT}/pr-api.json")"
+
+          if [[ -z "${head_ref}" || "${head_ref}" == "main" || "${head_ref}" == "master" || "${head_ref}" == "${base_ref}" || "${head_repo}" != "${REPO}" ]]; then
+            post_comment_text "Agent fix loop stopped: unsafe branch target. head_ref=${head_ref}, base_ref=${base_ref}, head_repo=${head_repo}."
+            exit 0
+          fi
+
+          final_state="max_iterations_reached"
+          last_auto_commit=""
+          prev_failing=0
+          prev_failed_runs=0
+          prev_unresolved=0
 
           for iteration in $(seq 1 "${max_iterations}"); do
             started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -173,8 +406,9 @@ jobs:
             )"
 
             if [[ -z "${run_id}" ]]; then
-              echo "Could not locate diagnostics run" >&2
-              exit 1
+              post_comment_text "Agent fix loop stopped: could not locate diagnostics run."
+              final_state="diagnostics_run_not_found"
+              break
             fi
 
             ops_gh run watch "${run_id}" --repo "${OPS_REPO}" --exit-status
@@ -185,63 +419,86 @@ jobs:
 
             diagnostics_file="$(find "${iteration_dir}" -name diagnostics.json -print -quit)"
             if [[ -z "${diagnostics_file}" ]]; then
-              echo "diagnostics.json not found in downloaded artifact" >&2
-              exit 1
+              post_comment_text "Agent fix loop stopped: diagnostics.json was not found in the downloaded artifact."
+              final_state="diagnostics_missing"
+              break
             fi
 
             failing="$(jq -r '.check_summary.failing // 0' "${diagnostics_file}")"
             pending="$(jq -r '.check_summary.pending // 0' "${diagnostics_file}")"
             failed_runs="$(jq -r '.run_summary.failures // 0' "${diagnostics_file}")"
             unresolved="$(jq -r '.unresolved_review_threads | length' "${diagnostics_file}")"
-            classification="$(classify_logs "${iteration_dir}")"
+            classification="$(classify_failure "${iteration_dir}" "${diagnostics_file}")"
 
-            jq -n \
-              --arg iteration "${iteration}" \
-              --arg diagnostics_run_id "${run_id}" \
-              --arg diagnostics_run_url "https://github.com/${OPS_REPO}/actions/runs/${run_id}" \
-              --arg classification "${classification}" \
-              --argjson failing "${failing}" \
-              --argjson pending "${pending}" \
-              --argjson failed_runs "${failed_runs}" \
-              --argjson unresolved_review_threads "${unresolved}" \
-              '{
-                iteration: ($iteration|tonumber),
-                diagnostics_run_id: ($diagnostics_run_id|tonumber),
-                diagnostics_run_url: $diagnostics_run_url,
-                classification: $classification,
-                check_summary: {
-                  failing: $failing,
-                  pending: $pending
-                },
-                failed_runs: $failed_runs,
-                unresolved_review_threads: $unresolved_review_threads
-              }' >> "${ITERATION_LOG}"
-
-            if [[ "${failing}" -eq 0 && "${pending}" -eq 0 && "${failed_runs}" -eq 0 && "${unresolved}" -eq 0 ]]; then
-              jq -n '{body:"✅ PR is clean. Ready to merge."}' > "${OUT}/clean-comment.json"
-              post_pr_comment "${OUT}/clean-comment.json"
+            if [[ -n "${last_auto_commit}" ]] && is_worse_than_previous "${failing}" "${failed_runs}" "${unresolved}" "${prev_failing}" "${prev_failed_runs}" "${prev_unresolved}"; then
+              rollback_commit "${head_ref}" "${last_auto_commit}"
+              post_comment_text "Agent fix loop rolled back auto-patch commit ${last_auto_commit} because diagnostics got worse. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "rollback" "${last_auto_commit}" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="rolled_back"
               break
             fi
 
-            suggestion="$(suggested_fix "${classification}")"
-            jq -n \
-              --arg classification "${classification}" \
-              --arg diagnostics_url "https://github.com/${OPS_REPO}/actions/runs/${run_id}" \
-              --arg suggestion "${suggestion}" \
-              '{
-                body: (
-                  "### Agent fix loop diagnostics\n\n" +
-                  "- Classification: `" + $classification + "`\n" +
-                  "- Diagnostics run: " + $diagnostics_url + "\n\n" +
-                  "Suggested next step:\n\n" + $suggestion + "\n\n" +
-                  "This workflow suggests fixes only. It does not push code directly."
-                )
-              }' > "${OUT}/suggestion-${iteration}.json"
-            post_pr_comment "${OUT}/suggestion-${iteration}.json"
-
-            if [[ "${iteration}" -lt "${max_iterations}" ]]; then
-              sleep 60
+            if diagnostics_clean "${failing}" "${pending}" "${failed_runs}" "${unresolved}"; then
+              post_comment_text "PR is clean. Ready for human merge review. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "clean" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="clean"
+              break
             fi
+
+            if [[ "${classification}" == "pending" ]]; then
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "wait" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              sleep 45
+              continue
+            fi
+
+            suggestion="$(suggestion_for_class "${classification}")"
+            if [[ "${patch_mode}" == "suggest" ]]; then
+              post_comment_text "Agent fix loop suggestion mode. Classification: ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n\n${suggestion}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "suggested" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="suggested"
+              if [[ "${iteration}" -lt "${max_iterations}" ]]; then
+                sleep 30
+              fi
+              continue
+            fi
+
+            patch_dir="${WORK}/patch-${iteration}"
+            clone_pr_branch "${head_ref}" "${patch_dir}"
+            set +e
+            apply_patch_for_class "${classification}" "${patch_dir}"
+            patch_status="$?"
+            set -e
+
+            if [[ "${patch_status}" -eq 2 ]]; then
+              post_comment_text "Agent fix loop stopped: classification ${classification} is not safely auto-patchable by the current implementation. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n\n${suggestion}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "non_patchable" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="non_patchable"
+              break
+            fi
+
+            set +e
+            commit_sha="$(commit_and_push_if_changed "${patch_dir}" "${classification}" "${head_ref}")"
+            commit_status="$?"
+            set -e
+
+            if [[ "${commit_status}" -eq 3 ]]; then
+              post_comment_text "Agent fix loop stopped: classification ${classification} produced no working tree diff. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "no_diff" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="no_diff"
+              break
+            elif [[ "${commit_status}" -ne 0 ]]; then
+              post_comment_text "Agent fix loop stopped: push or commit failed for classification ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "push_failed" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              final_state="push_failed"
+              break
+            fi
+
+            last_auto_commit="${commit_sha}"
+            prev_failing="${failing}"
+            prev_failed_runs="${failed_runs}"
+            prev_unresolved="${unresolved}"
+            append_iteration_log "${iteration}" "${run_id}" "${classification}" "patched" "${commit_sha}" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+            sleep 30
           done
 
           jq -s '.' "${ITERATION_LOG}" > "${OUT}/iterations.json"
@@ -249,23 +506,32 @@ jobs:
             --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
             --arg target "${REPO}" \
             --arg pr_number "${PR_NUMBER}" \
+            --arg patch_mode "${patch_mode}" \
             --arg max_iterations "${max_iterations}" \
+            --arg final_state "${final_state}" \
+            --arg head_ref "${head_ref}" \
             --slurpfile iterations "${OUT}/iterations.json" \
             '{
               generated_at: $generated_at,
               target: $target,
               pr_number: ($pr_number|tonumber),
+              head_ref: $head_ref,
+              patch_mode: $patch_mode,
               max_iterations: ($max_iterations|tonumber),
+              final_state: $final_state,
               iterations: $iterations[0]
             }' > "${REPORT}"
 
           {
-            echo "### Agent Fix Loop"
+            echo "### Agent Fix Loop v2"
             echo ""
             echo "| Field | Value |"
             echo "|---|---:|"
             echo "| Target | ${REPO} |"
             echo "| PR | #${PR_NUMBER} |"
+            echo "| Head branch | ${head_ref} |"
+            echo "| Patch mode | ${patch_mode} |"
+            echo "| Final state | ${final_state} |"
             echo "| Iterations | $(jq -r 'length' "${OUT}/iterations.json") |"
           } >> "$GITHUB_STEP_SUMMARY"
 
