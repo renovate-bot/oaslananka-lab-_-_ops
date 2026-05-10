@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -18,9 +19,11 @@ app = FastAPI(title="ops-webhook")
 OPS_REPO = os.getenv("OPS_REPO", "oaslananka-lab/_ops")
 PERSONAL_OWNER = os.getenv("PERSONAL_OWNER", "oaslananka")
 ORG_OWNER = os.getenv("ORG_OWNER", "oaslananka-lab")
+ROUTED_OWNERS = {PERSONAL_OWNER, ORG_OWNER}
 API_VERSION = os.getenv("GITHUB_API_VERSION", "2026-03-10")
 
 PR_ACTIONS = {"opened", "synchronize", "reopened", "closed"}
+CHECK_RUN_FAILURES = {"failure", "timed_out"}
 
 
 def _json(status: str, **payload: Any) -> JSONResponse:
@@ -78,13 +81,36 @@ def _repository_identity(payload: dict[str, Any]) -> tuple[str, str, str]:
     return owner, repo, default_branch
 
 
+def _comment_should_dispatch(body: str) -> bool:
+    return "@oaslananka-repo-ops" in body or re.search(r"(^|\s)/ops(\s|$)", body, re.IGNORECASE) is not None
+
+
 async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
     owner, repo, default_branch = _repository_identity(payload)
 
-    if owner != PERSONAL_OWNER:
-        return {"handled": False, "reason": "not personal repo", "owner": owner}
+    if owner not in ROUTED_OWNERS:
+        return {"handled": False, "reason": "owner not routed", "owner": owner}
 
     action = payload.get("action") or ""
+
+    if event == "check_run" and action == "completed":
+        check_run = payload.get("check_run") or {}
+        conclusion = check_run.get("conclusion") or ""
+        if conclusion in CHECK_RUN_FAILURES:
+            for pr in check_run.get("pull_requests") or []:
+                pr_num = pr.get("number")
+                if pr_num:
+                    return await dispatch(
+                        "agent-fix-loop.yml",
+                        {
+                            "target_owner": owner,
+                            "target_repo": repo,
+                            "pr_number": str(pr_num),
+                            "max_iterations": "3",
+                            "patch_mode": "suggest",
+                        },
+                    )
+        return {"handled": False, "reason": "check_run not actionable", "conclusion": conclusion}
 
     if event == "pull_request" and action in PR_ACTIONS:
         pr = payload.get("pull_request") or {}
@@ -109,7 +135,7 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
-    if event == "push" and payload.get("ref") == f"refs/heads/{default_branch}":
+    if event == "push" and payload.get("ref") == f"refs/heads/{default_branch}" and owner == PERSONAL_OWNER:
         return await dispatch(
             "repo-mirror-sync.yml",
             {
@@ -119,12 +145,14 @@ async def _route_event(event: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "target_repo": repo,
             },
         )
+    if event == "push" and payload.get("ref") == f"refs/heads/{default_branch}" and owner == ORG_OWNER:
+        return {"handled": False, "reason": "org default-branch push is not mirrored"}
 
     if event == "issue_comment" and action == "created":
         comment = payload.get("comment") or {}
         body = comment.get("body") or ""
-        if "@oaslananka-repo-ops" not in body:
-            return {"handled": False, "reason": "comment does not mention app"}
+        if not _comment_should_dispatch(body):
+            return {"handled": False, "reason": "comment does not mention app or /ops command"}
 
         issue = payload.get("issue") or {}
         return await dispatch(
