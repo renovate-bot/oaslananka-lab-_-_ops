@@ -151,6 +151,28 @@ The first validated patch class is trailing whitespace normalization on `oaslana
 
 The workflow does not create new branches, does not push to main, does not force-push, does not merge, and does not perform broad refactors.
 
+Comment rendering is normalized before posting to GitHub. Literal escaped sequences such as `\n` and `\t` are converted to real Markdown newlines/tabs so PR comments remain readable.
+
+## GitHub Agentic Workflows
+
+The control-plane also includes gh-aw compiled workflows:
+
+```text
+pr-fix        deterministic PR repair through safe outputs
+issue-triage  issue classification and concise responses
+ci-doctor     failed CI diagnosis and optional PR fix dispatch
+```
+
+These workflows are compiled and dry-run validated, but the Copilot engine requires a `_ops` repository secret named `COPILOT_GITHUB_TOKEN`.
+
+Until that secret exists, production webhook routing uses `agent-fix-loop.yml` for failed `check_run` events. The webhook service can opt into gh-aw later by setting:
+
+```text
+CHECK_RUN_WORKFLOW=ci-doctor.lock.yml
+```
+
+This keeps automatic check-run handling green while preserving gh-aw as the next engine-backed automation layer.
+
 ## Control-plane
 
 `oaslananka-lab/_ops` is the sole cross-repository automation authority.

@@ -285,3 +285,32 @@ Skipped:
   - No auto-merge or production publish.
 
 Next: Continue only with explicitly approved production rollout or maintenance PR merge actions.
+
+## 2026-05-10 - _ops agentic workflow and mirror-sync hardening verified
+
+Completed: 2026-05-10T11:25:00+03:00
+
+Applied:
+  - Added compiled gh-aw workflows for `pr-fix`, `issue-triage`, and `ci-doctor`.
+  - Validated gh-aw dry-run dispatch for `pr-fix`.
+  - Confirmed gh-aw runtime currently requires `_ops` secret `COPILOT_GITHUB_TOKEN`; no substitute token was reused.
+  - Kept webhook `check_run` routing on `agent-fix-loop.yml` by default so production routing remains green with existing GitHub App credentials.
+  - Added `/ops fix` routing through `inbox-handler.yml` to trigger `agent-fix-loop.yml` patch mode.
+  - Fixed `agent-fix-loop.yml` GitHub comments so escaped `\n` and `\t` sequences render as real Markdown whitespace.
+  - Updated `repo-mirror-sync.yml` to prefer normal fast-forward pushes and use explicit `--force-with-lease` only for divergent mirror histories.
+  - Added the `oaslananka-repo-ops` GitHub App as a bypass actor only on `oaslananka-lab/test` ruleset `16164303`, preserving the existing deletion, non-fast-forward, and required-linear-history rules.
+  - Re-ran `repo-mirror-sync.yml` for `oaslananka/test -> oaslananka-lab/test`; result was `sync_status=synced`.
+  - Ran final `_ops` cross-repo smoke against `oaslananka-lab/test`; result was success.
+
+Validation:
+  - gh-aw `pr-fix` dry-run: success
+  - `agent-fix-loop.yml` comment formatting check: escaped newline/tab conversion present
+  - Mirror sync: https://github.com/oaslananka-lab/_ops/actions/runs/25623922977
+  - Mirror sync artifact: `mirror-artifacts/test-current-3/mirror-sync-oaslananka-test.json`
+  - Cross-repo smoke: https://github.com/oaslananka-lab/_ops/actions/runs/25623940448
+
+Skipped:
+  - gh-aw production auto-routing because `_ops` does not yet have `COPILOT_GITHUB_TOKEN`.
+  - Auto-merge and production publish.
+
+Next: Add a proper `COPILOT_GITHUB_TOKEN` secret for gh-aw runtime, then switch Render `CHECK_RUN_WORKFLOW` to `ci-doctor.lock.yml` and re-test failed-check routing.

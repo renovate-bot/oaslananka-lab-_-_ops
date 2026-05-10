@@ -1,4 +1,5 @@
 .gitattributes text eol=lf
+*.md text eol=lf
 .github/workflows/*.md text eol=lf
 .github/workflows/*.yml text eol=lf
 .github/workflows/*.lock.yml linguist-generated=true merge=ours

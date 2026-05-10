@@ -623,3 +623,67 @@ child onboarding           https://github.com/oaslananka-lab/_ops/actions/runs/2
 child onboarding           https://github.com/oaslananka-lab/_ops/actions/runs/25622470820
 result                     all success
 ```
+
+---
+
+## 14. Update - _ops agentic workflow and mirror-sync hardening
+
+Generated: 2026-05-10
+
+Control-plane changes:
+
+```text
+gh-aw pr-fix        compiled and dry-run validated
+gh-aw issue-triage  compiled
+gh-aw ci-doctor     compiled
+check_run routing   agent-fix-loop.yml by default
+/ops fix            agent-fix-loop.yml patch mode
+comment rendering   escaped newline/tab sequences normalized before posting
+mirror-sync         fast-forward first, force-with-lease only for divergence
+```
+
+Runtime constraint:
+
+```text
+COPILOT_GITHUB_TOKEN is not present in oaslananka-lab/_ops secrets.
+gh-aw runtime remains gated until that secret is configured.
+No existing token was reused as a substitute.
+```
+
+Webhook health:
+
+```text
+https://webhook.oaslananka.dev/health -> 200 OK
+```
+
+Mirror sync validation:
+
+```text
+Run:          https://github.com/oaslananka-lab/_ops/actions/runs/25623922977
+Source:       oaslananka/test
+Target:       oaslananka-lab/test
+Status:       synced
+Source SHA:   5bfe7f78cb201ece47d63f14c711e30415093543
+Target before 10f58c6704e7ca19f914533129c10036a9fb6486
+Target after  5bfe7f78cb201ece47d63f14c711e30415093543
+Artifact:     mirror-artifacts/test-current-3/mirror-sync-oaslananka-test.json
+```
+
+Ruleset adjustment:
+
+```text
+Repository:     oaslananka-lab/test
+Ruleset:        16164303 repo-ops main baseline
+Bypass actor:   oaslananka-repo-ops GitHub App
+Actor type:     Integration
+Bypass mode:    always
+Scope:          test repo only
+Rules retained: deletion, non_fast_forward, required_linear_history
+```
+
+Final smoke:
+
+```text
+repo-ops-cross-repo-smoke.yml https://github.com/oaslananka-lab/_ops/actions/runs/25623940448
+result                        success
+```

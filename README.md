@@ -41,6 +41,18 @@ docs/agent-operating-contract.md
 | `repo-release-plan.yml` | Assesses release readiness: environments, release-please files, release workflow permissions, attestations, immutable releases, tags, and latest release. |
 | `repo-release-apply.yml` | Applies release configuration such as the production environment and optional immutable releases. |
 
+## Agentic Workflows
+
+The repository also carries compiled GitHub Agentic Workflows:
+
+| Workflow | Status |
+|---|---|
+| `pr-fix` | Compiled and dry-run validated. Intended to patch deterministic PR failures through gh-aw safe outputs. |
+| `issue-triage` | Compiled for concise issue classification and labeling. |
+| `ci-doctor` | Compiled for failed CI diagnosis. Runtime use is gated until `_ops` has a valid `COPILOT_GITHUB_TOKEN` secret. |
+
+Automatic webhook routing currently stays on `agent-fix-loop.yml` by default because that deterministic workflow runs with the existing GitHub App credentials. Set `CHECK_RUN_WORKFLOW=ci-doctor.lock.yml` on the webhook runtime only after the gh-aw Copilot engine secret is configured.
+
 ## Onboard a Repository
 
 Run onboarding from `_ops`:
