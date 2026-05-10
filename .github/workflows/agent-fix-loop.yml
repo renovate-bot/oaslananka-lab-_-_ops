@@ -90,6 +90,13 @@ jobs:
             GH_TOKEN="${OPS_TOKEN}" gh "$@"
           }
 
+          ops_api() {
+            GH_TOKEN="${OPS_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
           post_comment_text() {
             local text="$1"
             local body_file="${OUT}/comment-$(date +%s%N).json"
@@ -385,28 +392,29 @@ jobs:
           prev_unresolved=0
 
           for iteration in $(seq 1 "${max_iterations}"); do
-            started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            ops_gh workflow run agent-pr-diagnostics.yml \
-              --repo "${OPS_REPO}" \
-              --ref main \
-              -f target_owner="${TARGET_OWNER}" \
-              -f target_repo="${TARGET_REPO}" \
-              -f pr_number="${PR_NUMBER}"
+            dispatch_body="${OUT}/diagnostics-dispatch-${iteration}.json"
+            dispatch_response="${OUT}/diagnostics-dispatch-${iteration}-response.json"
+            jq -n \
+              --arg target_owner "${TARGET_OWNER}" \
+              --arg target_repo "${TARGET_REPO}" \
+              --arg pr_number "${PR_NUMBER}" \
+              '{
+                ref: "main",
+                inputs: {
+                  target_owner: $target_owner,
+                  target_repo: $target_repo,
+                  pr_number: $pr_number
+                }
+              }' > "${dispatch_body}"
 
-            sleep 15
+            ops_api --method POST \
+              "repos/${OPS_REPO}/actions/workflows/agent-pr-diagnostics.yml/dispatches" \
+              --input "${dispatch_body}" > "${dispatch_response}"
 
-            run_id="$(
-              ops_gh run list \
-                --repo "${OPS_REPO}" \
-                --workflow agent-pr-diagnostics.yml \
-                --json databaseId,createdAt,event,status \
-                --jq ".[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"${started_at}\") | .databaseId" \
-                --limit 20 |
-              head -n 1
-            )"
+            run_id="$(jq -r '.workflow_run_id // .id // empty' "${dispatch_response}")"
 
             if [[ -z "${run_id}" ]]; then
-              post_comment_text "Agent fix loop stopped: could not locate diagnostics run."
+              post_comment_text "Agent fix loop stopped: diagnostics workflow dispatch did not return a run id."
               final_state="diagnostics_run_not_found"
               break
             fi

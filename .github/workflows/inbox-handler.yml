@@ -177,10 +177,35 @@ jobs:
           trigger_ops_workflow() {
             local workflow="$1"
             shift
-            GH_TOKEN="${OPS_TOKEN}" gh workflow run "${workflow}" \
-              --repo "${OPS_REPO}" \
-              --ref main \
-              "$@"
+            local inputs_file="${RAW}/dispatch-${workflow//[^A-Za-z0-9_.-]/-}-inputs.json"
+            local body_file="${RAW}/dispatch-${workflow//[^A-Za-z0-9_.-]/-}-body.json"
+            local response_file="${RAW}/dispatch-${workflow//[^A-Za-z0-9_.-]/-}-response.json"
+            jq -n '{}' > "${inputs_file}"
+
+            while [[ "$#" -gt 0 ]]; do
+              case "$1" in
+                -f)
+                  local pair="$2"
+                  local key="${pair%%=*}"
+                  local value="${pair#*=}"
+                  local next="${inputs_file}.next"
+                  jq --arg key "${key}" --arg value "${value}" '. + {($key): $value}' "${inputs_file}" > "${next}"
+                  mv "${next}" "${inputs_file}"
+                  shift 2
+                  ;;
+                *)
+                  shift
+                  ;;
+              esac
+            done
+
+            jq -n --slurpfile inputs "${inputs_file}" '{ref:"main",inputs:$inputs[0]}' > "${body_file}"
+            GH_TOKEN="${OPS_TOKEN}" gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "repos/${OPS_REPO}/actions/workflows/${workflow}/dispatches" \
+              --input "${body_file}" > "${response_file}"
+            jq -r '.workflow_run_id // .id // empty' "${response_file}"
           }
 
           if [[ "${EVENT_TYPE}" == "comment" ]]; then

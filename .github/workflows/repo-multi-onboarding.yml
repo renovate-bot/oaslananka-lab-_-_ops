@@ -34,13 +34,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh workflow run repo-onboarding.yml \
-            --repo "${GITHUB_REPOSITORY}" \
-            --ref "${GITHUB_REF_NAME}" \
-            -f target_owner="${TARGET_OWNER}" \
-            -f target_repo="${TARGET_REPO}" \
-            -f desired_ruleset_profile=operational \
-            -f repo_role=org_mirror
+          dispatch_body="${RUNNER_TEMP}/repo-onboarding-${TARGET_REPO}.json"
+          dispatch_response="${RUNNER_TEMP}/repo-onboarding-${TARGET_REPO}-response.json"
+          jq -n \
+            --arg ref "${GITHUB_REF_NAME}" \
+            --arg target_owner "${TARGET_OWNER}" \
+            --arg target_repo "${TARGET_REPO}" \
+            '{
+              ref: $ref,
+              inputs: {
+                target_owner: $target_owner,
+                target_repo: $target_repo,
+                desired_ruleset_profile: "operational",
+                repo_role: "org_mirror"
+              }
+            }' > "${dispatch_body}"
+
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/repo-onboarding.yml/dispatches" \
+            --input "${dispatch_body}" > "${dispatch_response}"
+
+          run_id="$(jq -r '.workflow_run_id // .id // empty' "${dispatch_response}")"
 
           {
             echo "### Repo Multi Onboarding"
@@ -49,5 +65,6 @@ jobs:
             echo "|---|---:|"
             echo "| Target | ${TARGET_OWNER}/${TARGET_REPO} |"
             echo "| Dispatched workflow | repo-onboarding.yml |"
+            echo "| Run ID | ${run_id:-unavailable} |"
             echo "| Ref | ${GITHUB_REF_NAME} |"
           } >> "${GITHUB_STEP_SUMMARY}"
