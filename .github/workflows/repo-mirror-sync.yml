@@ -191,7 +191,12 @@ jobs:
             status="up_to_date"
             record "default_branch" "up_to_date" "${default_branch}@${source_sha}"
           else
-            git push --force-with-lease target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+            if [[ -n "${target_sha_before}" ]]; then
+              git push --force-with-lease="refs/heads/${default_branch}:${target_sha_before}" \
+                target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+            else
+              git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+            fi
             status="synced"
             record "default_branch" "synced" "${default_branch}@${source_sha}"
           fi
