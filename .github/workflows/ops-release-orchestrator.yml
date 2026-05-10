@@ -193,20 +193,73 @@ jobs:
             target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 25 \
               --json databaseId,event,status,conclusion,headSha,createdAt,url > "${RAW}/release-workflow-runs.json" || return 0
             if [[ -n "${MERGE_COMMIT_SHA}" ]]; then
-              jq -r --arg sha "${MERGE_COMMIT_SHA}" '
+              matched="$(jq -r --arg sha "${MERGE_COMMIT_SHA}" '
                 map(select(.headSha == $sha)) | first.databaseId // empty
-              ' "${RAW}/release-workflow-runs.json"
-            else
-              jq -r '
-                map(select(.event == "push")) | first.databaseId // empty
-              ' "${RAW}/release-workflow-runs.json"
+              ' "${RAW}/release-workflow-runs.json")"
+              if [[ -n "${matched}" ]]; then
+                echo "${matched}"
+                return 0
+              fi
             fi
+            jq -r '
+              map(select(.event == "push")) | first.databaseId // empty
+            ' "${RAW}/release-workflow-runs.json"
           }
 
           watch_release_run() {
             local run_id="$1"
             [[ -n "${run_id}" ]] || return 1
-            target_gh run watch "${run_id}" --repo "${REPO}" --exit-status
+            local attempt status conclusion
+            for attempt in $(seq 1 90); do
+              target_gh run view "${run_id}" --repo "${REPO}" --json status,conclusion,jobs,url \
+                > "${RAW}/release-run-${run_id}.json"
+              status="$(jq -r '.status // ""' "${RAW}/release-run-${run_id}.json")"
+              conclusion="$(jq -r '.conclusion // ""' "${RAW}/release-run-${run_id}.json")"
+              if [[ "${status}" == "completed" ]]; then
+                [[ "${conclusion}" == "success" ]] && return 0
+                return 1
+              fi
+              if jq -e '.jobs[]? | select(.status == "waiting")' "${RAW}/release-run-${run_id}.json" >/dev/null; then
+                if [[ "$(jq -r '.publish.enabled' "${OUT}/policy.json")" != "true" ]]; then
+                  return 2
+                fi
+                return 3
+              fi
+              sleep 10
+            done
+            return 3
+          }
+
+          handle_release_run() {
+            local run_id="$1"
+            local status_label="$2"
+            local rc
+            set +e
+            watch_release_run "${run_id}"
+            rc="$?"
+            set -e
+            case "${rc}" in
+              0)
+                final_state="release_workflow_dispatched"
+                record "release_workflow" "${status_label}" "${release_workflow} run_id=${run_id}"
+                return 0
+                ;;
+              2)
+                final_state="release_workflow_dispatched"
+                record "release_workflow" "publish_gate_reached" "${release_workflow} run_id=${run_id}"
+                return 0
+                ;;
+              3)
+                final_state="awaiting_environment_approval"
+                record "release_workflow" "awaiting_environment_approval" "run_id=${run_id}"
+                return 0
+                ;;
+              *)
+                final_state="release_workflow_failed"
+                record "release_workflow" "failed" "run_id=${run_id}"
+                return 1
+                ;;
+            esac
           }
 
           node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
@@ -258,26 +311,21 @@ jobs:
                     record "release_workflow" "dispatch_failed" "${release_workflow}"
                     exit 0
                   fi
-                  if ! watch_release_run "${release_workflow_run_id}"; then
-                    final_state="release_workflow_failed"
-                    record "release_workflow" "observed_push_run_failed" "run_id=${release_workflow_run_id}"
+                  if ! handle_release_run "${release_workflow_run_id}" "observed_push_run_success"; then
                     exit 0
                   fi
-                  final_state="release_workflow_dispatched"
-                  record "release_workflow" "observed_push_run_success" "${release_workflow} run_id=${release_workflow_run_id}"
                 else
-                sleep 8
-                release_workflow_run_id="$(target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 10 --json databaseId,createdAt |
-                  jq -r --arg before "${before}" 'map(select(.createdAt >= $before)) | first.databaseId // .[0].databaseId // empty')"
-                if [[ -n "${release_workflow_run_id}" ]]; then
-                  watch_release_run "${release_workflow_run_id}" || {
-                    final_state="release_workflow_failed"
-                    record "release_workflow" "failed" "run_id=${release_workflow_run_id}"
-                    exit 0
-                  }
-                fi
-                final_state="release_workflow_dispatched"
-                record "release_workflow" "success" "${release_workflow} run_id=${release_workflow_run_id}"
+                  sleep 8
+                  release_workflow_run_id="$(target_gh run list --repo "${REPO}" --workflow "${release_workflow}" --limit 10 --json databaseId,createdAt |
+                    jq -r --arg before "${before}" 'map(select(.createdAt >= $before)) | first.databaseId // .[0].databaseId // empty')"
+                  if [[ -n "${release_workflow_run_id}" ]]; then
+                    if ! handle_release_run "${release_workflow_run_id}" "success"; then
+                      exit 0
+                    fi
+                  else
+                    final_state="release_workflow_dispatched"
+                    record "release_workflow" "success" "${release_workflow} run_id="
+                  fi
                 fi
               fi
 
