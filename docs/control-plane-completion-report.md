@@ -430,3 +430,94 @@ Remaining controlled work:
 2. Proceed to boardguard marketplace tooling only as the next scoped phase.
 3. Do not start Group B rollout until boardguard final validation is clean.
 ```
+
+---
+
+## 12. Update - boardguard maintenance automation PR green
+
+Generated: 2026-05-10
+
+Target PR:
+
+```text
+Repository:  oaslananka-lab/boardguard
+PR:          https://github.com/oaslananka-lab/boardguard/pull/17
+Branch:      automation/boardguard-release-readiness
+Head SHA:    3a3eb3c10f0f0b4eca4195486d7b831a81662344
+State:       open
+Mergeable:   true
+Review:      approved
+```
+
+Added/updated in PR #17:
+
+```text
+.github/renovate.json
+.mergify.yml
+.github/labeler.yml
+.github/workflows/labeler.yml
+.github/workflows/stale.yml
+sonar-project.properties
+.github/workflows/ci.yml
+CODEOWNERS
+CONTRIBUTING.md
+README.md
+Taskfile.yml
+scripts/release-state.mjs
+src/core/discovery.ts
+src/kicad/cli.ts
+src/rules/kicad.ts
+tests/boardguard.test.ts
+```
+
+Local validation:
+
+```text
+task ci                                                   OK
+actionlint .github/workflows/*.yml                       OK
+uvx --from zizmor==1.24.1 zizmor --offline ...           OK
+gitleaks detect --no-git --redact --source .             OK
+```
+
+Remote PR validation:
+
+```text
+PR checks:                 18 successful, 0 failing, 0 pending
+Unresolved review threads: 0
+_ops diagnostics:          https://github.com/oaslananka-lab/_ops/actions/runs/25619083704
+```
+
+_ops boardguard validation:
+
+```text
+Onboarding:    https://github.com/oaslananka-lab/_ops/actions/runs/25619091504
+Release plan:  https://github.com/oaslananka-lab/_ops/actions/runs/25619097157
+Audit:         https://github.com/oaslananka-lab/_ops/actions/runs/25619123901
+```
+
+Boardguard validation state:
+
+```text
+release_ready              true
+release_plan_issues        0
+secret_scanning_ok         true
+dependency_graph_sbom_ok   true
+selected_actions_ok        true
+code_scanning_open_alerts  7
+```
+
+Policy/settings changes:
+
+```text
+Selected-actions policy remains active.
+Added pinned allowlist entries for:
+- codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238
+- SonarSource/sonarqube-scan-action@13990a695682794b53148ff9f6a8b6e22e43955e
+```
+
+Not done:
+
+```text
+PR #17 was not auto-merged.
+Group B rollout was not started.
+```

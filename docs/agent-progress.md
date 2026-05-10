@@ -173,3 +173,44 @@ Skipped:
   - Render MCP deploy inspection because the Render MCP reported no selected workspace and no Render CLI/API token was available locally.
 
 Next: Validate `/ops fix` against a temporary PR comment path or proceed to boardguard final marketplace tooling only after explicit scope confirmation.
+
+## 2026-05-10 - boardguard maintenance automation PR validated
+
+Completed: 2026-05-10T03:52:00Z
+
+Applied:
+  - Reused existing boardguard PR #17 branch `automation/boardguard-release-readiness`; no duplicate PR was created.
+  - Added boardguard maintenance automation in PR #17:
+    - Renovate config.
+    - Mergify config.
+    - Codecov non-blocking CI upload.
+    - SonarQube non-blocking CI scan.
+    - actions/labeler config and workflow.
+    - actions/stale workflow.
+    - README OpenSSF Scorecard, CI, release, and license badges.
+    - CODEOWNERS expansion.
+    - CONTRIBUTING.md workflow/checklist updates.
+    - Taskfile corepack/pnpm standardization.
+  - Updated boardguard selected-actions allowlist with pinned Codecov and SonarQube action SHAs so strict selected-actions policy remains active.
+  - Fixed `scripts/release-state.mjs` so release dry-run accepts any exact `oaslananka-lab/boardguard` remote, including `origin`.
+  - Addressed actionable review-thread findings in PR #17:
+    - Oversized hierarchical schematic sheets no longer create malformed discovery findings before `BG-IO-TOO-LARGE`.
+    - `kicad.enabled: false` no longer produces a KiCad unavailable finding.
+    - KiCad help lookup failures no longer silently drop user-configured DRC/ERC flags.
+  - Resolved four addressed GitHub review threads after patch commits.
+  - Local boardguard validation passed:
+    - `task ci`
+    - `actionlint`
+    - `uvx --from zizmor==1.24.1 zizmor --offline --min-severity low .github/workflows`
+    - `gitleaks detect --no-git --redact --source .`
+  - Remote PR #17 checks are green: 18 successful checks, 0 failing, 0 pending.
+  - Ran _ops PR diagnostics for boardguard PR #17: https://github.com/oaslananka-lab/_ops/actions/runs/25619083704
+  - Ran _ops boardguard onboarding validation: https://github.com/oaslananka-lab/_ops/actions/runs/25619091504
+  - Ran _ops boardguard release plan: https://github.com/oaslananka-lab/_ops/actions/runs/25619097157
+  - Ran _ops boardguard audit: https://github.com/oaslananka-lab/_ops/actions/runs/25619123901
+
+Skipped:
+  - Auto-merge of PR #17 because the active execution contract forbids auto-merge.
+  - Group B rollout. boardguard pilot PR is green, but its merge still requires an explicit human merge step.
+
+Next: Merge boardguard PR #17 manually or explicitly authorize merge; after main contains the boardguard pilot changes, start Group B one repo at a time.
