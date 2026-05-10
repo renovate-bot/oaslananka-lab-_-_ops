@@ -521,3 +521,95 @@ Not done:
 PR #17 was not auto-merged.
 Group B rollout was not started.
 ```
+
+---
+
+## 13. Update - Group B MCP pilot repositories onboarded
+
+Generated: 2026-05-10
+
+Repositories:
+
+```text
+oaslananka-lab/mcp-health-monitor
+oaslananka-lab/mcp-debug-recorder
+oaslananka-lab/mcp-infra-lens
+```
+
+Organization mirror status:
+
+```text
+mcp-health-monitor  existed before this pass
+mcp-debug-recorder  created from oaslananka/mcp-debug-recorder
+mcp-infra-lens      created from oaslananka/mcp-infra-lens
+```
+
+Control-plane runs:
+
+```text
+mcp-health-monitor onboarding      https://github.com/oaslananka-lab/_ops/actions/runs/25620728088
+mcp-health-monitor baseline apply  https://github.com/oaslananka-lab/_ops/actions/runs/25620739517
+mcp-health-monitor release apply   https://github.com/oaslananka-lab/_ops/actions/runs/25621749537
+mcp-health-monitor release plan    https://github.com/oaslananka-lab/_ops/actions/runs/25621762065
+mcp-health-monitor final audit     https://github.com/oaslananka-lab/_ops/actions/runs/25622403010
+
+mcp-debug-recorder onboarding      https://github.com/oaslananka-lab/_ops/actions/runs/25620764354
+mcp-debug-recorder baseline apply  https://github.com/oaslananka-lab/_ops/actions/runs/25620778222
+mcp-debug-recorder release apply   https://github.com/oaslananka-lab/_ops/actions/runs/25621966387
+mcp-debug-recorder release plan    https://github.com/oaslananka-lab/_ops/actions/runs/25621970152
+mcp-debug-recorder final audit     https://github.com/oaslananka-lab/_ops/actions/runs/25621982540
+
+mcp-infra-lens onboarding          https://github.com/oaslananka-lab/_ops/actions/runs/25620795788
+mcp-infra-lens baseline apply      https://github.com/oaslananka-lab/_ops/actions/runs/25620808033
+mcp-infra-lens release apply       https://github.com/oaslananka-lab/_ops/actions/runs/25622243793
+mcp-infra-lens release plan        https://github.com/oaslananka-lab/_ops/actions/runs/25622247418
+mcp-infra-lens final audit         https://github.com/oaslananka-lab/_ops/actions/runs/25622261801
+```
+
+Repository CI status:
+
+```text
+mcp-health-monitor CI        https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366097
+mcp-health-monitor Security  https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366094
+mcp-health-monitor CodeQL    https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366100
+mcp-health-monitor Release   https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366098
+mcp-health-monitor Scorecard https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366095
+
+mcp-debug-recorder CI        https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930580
+mcp-debug-recorder Security  https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930583
+mcp-debug-recorder CodeQL    https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930571
+mcp-debug-recorder Release   https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930575
+mcp-debug-recorder Scorecard https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930578
+
+mcp-infra-lens CI            https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173448
+mcp-infra-lens Security      https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173453
+mcp-infra-lens CodeQL        https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173438
+mcp-infra-lens Release       https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173437
+mcp-infra-lens Scorecard     https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173446
+```
+
+Final audit state:
+
+```text
+mcp-health-monitor  branch rules 3, SBOM OK, secret scanning OK, Dependabot 0, secret alerts 0, code scanning alerts 0
+mcp-debug-recorder  branch rules 3, SBOM OK, secret scanning OK, Dependabot 0, secret alerts 0, code scanning alerts 0
+mcp-infra-lens      branch rules 3, SBOM OK, secret scanning OK, Dependabot 0, secret alerts 0, code scanning alerts 0
+```
+
+Release readiness:
+
+```text
+mcp-health-monitor  release_ready true, issues 0
+mcp-debug-recorder  release_ready true, issues 0
+mcp-infra-lens      release_ready true, issues 0
+```
+
+Explicitly not done:
+
+```text
+No production publish was triggered.
+No npm, MCP Registry, GHCR, DockerHub, VS Marketplace, or Open VSX publish was run.
+No auto-merge was performed.
+No strict reviewer/approval ruleset was enabled.
+No bulk rollout beyond Group B was performed.
+```

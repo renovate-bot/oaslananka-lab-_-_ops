@@ -103,6 +103,34 @@ https://ops-webhook-wi0r.onrender.com/webhook?github=1
 
 Repository/App webhook delivery has been verified for issue routing. Org repository routing was validated with a signed synthetic `issue_comment` event against `oaslananka-lab/test`.
 
+## Current pilot scope
+
+The current controlled production-grade pilot set is:
+
+```text
+oaslananka-lab/test
+oaslananka-lab/boardguard
+oaslananka-lab/mcp-health-monitor
+oaslananka-lab/mcp-debug-recorder
+oaslananka-lab/mcp-infra-lens
+```
+
+The Group B MCP repositories are organization CI/CD and release authorities for their packages. Their personal counterparts remain upstream/source-side repositories in the one-way mirror model.
+
+The maintenance stack for these pilot repositories is:
+
+```text
+Renovate        dependency update PR authority
+Mergify         conditional Renovate patch/minor squash merge when checks are green
+Codecov         non-blocking coverage signal
+SonarQube Cloud non-blocking quality signal
+CodeQL          security/static analysis
+Scorecard       repository posture signal
+Gitleaks        local/workflow secret exposure scan
+zizmor          workflow security linting
+actionlint      workflow syntax linting
+```
+
 ## Agent fix loop v2
 
 `agent-fix-loop.yml` v2 is the bounded autonomous patcher for one pull request.

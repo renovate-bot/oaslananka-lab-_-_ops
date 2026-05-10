@@ -31,6 +31,15 @@ oaslananka-lab/_ops
 
 See docs/architecture.md for the full system model.
 
+Current controlled scope:
+  control-plane: oaslananka-lab/_ops
+  test repo: oaslananka-lab/test
+  pilot repo: oaslananka-lab/boardguard
+  Group B pilots:
+    - oaslananka-lab/mcp-health-monitor
+    - oaslananka-lab/mcp-debug-recorder
+    - oaslananka-lab/mcp-infra-lens
+
 Personal repos (oaslananka):
   role: source of truth
   actions: DISABLED — never attempt to trigger workflows here

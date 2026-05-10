@@ -25,6 +25,9 @@ oaslananka-lab/fovux
 oaslananka-lab/homebrew-tap
 oaslananka-lab/kicad-mcp-pro
 oaslananka-lab/kicad-studio
+oaslananka-lab/mcp-debug-recorder
+oaslananka-lab/mcp-health-monitor
+oaslananka-lab/mcp-infra-lens
 oaslananka-lab/mcp-ssh-tool
 oaslananka-lab/oaslananka.github.io
 oaslananka-lab/scoop-bucket

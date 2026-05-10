@@ -6,7 +6,9 @@ apply-artifacts/
 agent-diagnostics/
 onboarding-artifacts/
 triage-artifacts/
+mirror-artifacts/
 .local/
 __pycache__/
 *.pyc
 .env
+personal-actions-audit-*.json

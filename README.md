@@ -36,7 +36,8 @@ docs/agent-operating-contract.md
 | `repo-code-scanning-triage.yml` | Classifies open code scanning alerts into actionable, ruleset/review, process-policy, or manual-review buckets. |
 | `repo-mirror-sync.yml` | Syncs a personal source repo to its organization mirror and emits a mirror-sync JSON artifact. |
 | `inbox-handler.yml` | Handles webhook-routed issue/comment events, acknowledges issues, classifies them, labels ops/security issues, and dispatches `/ops` commands. |
-| `agent-fix-loop.yml` | Runs diagnostics repeatedly for a PR and posts fix suggestions without pushing code. |
+| `agent-fix-loop.yml` | Runs the bounded autonomous fix loop for one PR in `suggest` or `patch` mode. Patch mode checks out the same PR branch, applies deterministic low-risk fixes, commits without GPG signing, pushes without force, and repeats diagnostics. |
+| `repo-multi-onboarding.yml` | Dispatches `repo-onboarding.yml` for the Group B pilot repositories in parallel. |
 | `repo-release-plan.yml` | Assesses release readiness: environments, release-please files, release workflow permissions, attestations, immutable releases, tags, and latest release. |
 | `repo-release-apply.yml` | Applies release configuration such as the production environment and optional immutable releases. |
 
@@ -97,5 +98,19 @@ The receiver accepts GitHub webhook POST requests, validates `x-hub-signature-25
 | `issues` opened | Dispatch `inbox-handler.yml` with `event_type=issue`. |
 | `push` to the default branch from `oaslananka/*` | Dispatch `repo-mirror-sync.yml`. |
 | `issue_comment` created with `@oaslananka-repo-ops` | Dispatch `inbox-handler.yml` with `event_type=comment`. |
+| `issue_comment` containing `/ops fix` on a PR thread | Dispatch `agent-fix-loop.yml` in patch mode through `inbox-handler.yml`. |
+| `check_run` completed with `failure` or `timed_out` | Dispatch `agent-fix-loop.yml` in suggest mode. |
 
-Cloudflare DNS should route `webhook.oaslananka.dev` to the Render service with an orange-cloud CNAME once DNS write access is available. The current test path uses a repository webhook on `oaslananka/test` to exercise the same receiver and dispatch flow.
+Cloudflare DNS routes `webhook.oaslananka.dev` to the Render service. Both the direct Render health endpoint and the custom domain health endpoint have returned 200 OK in validation.
+
+## Current Pilot Scope
+
+The current controlled scope is `_ops`, `oaslananka-lab/test`, `oaslananka-lab/boardguard`, and the Group B pilot repositories:
+
+```text
+oaslananka-lab/mcp-health-monitor
+oaslananka-lab/mcp-debug-recorder
+oaslananka-lab/mcp-infra-lens
+```
+
+Group B repositories have been onboarded as organization CI/CD and release authorities. Production release workflows remain guarded by release-please and the `production` environment; no production publish is triggered by onboarding, audit, baseline, or release-plan runs.

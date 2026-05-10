@@ -1,0 +1,53 @@
+name: Repo Multi Onboarding
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: repo-multi-onboarding-group-b
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch onboarding for ${{ matrix.repo }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        repo:
+          - mcp-health-monitor
+          - mcp-debug-recorder
+          - mcp-infra-lens
+
+    steps:
+      - name: Dispatch repo onboarding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_OWNER: oaslananka-lab
+          TARGET_REPO: ${{ matrix.repo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh workflow run repo-onboarding.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${GITHUB_REF_NAME}" \
+            -f target_owner="${TARGET_OWNER}" \
+            -f target_repo="${TARGET_REPO}" \
+            -f desired_ruleset_profile=operational \
+            -f repo_role=org_mirror
+
+          {
+            echo "### Repo Multi Onboarding"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${TARGET_OWNER}/${TARGET_REPO} |"
+            echo "| Dispatched workflow | repo-onboarding.yml |"
+            echo "| Ref | ${GITHUB_REF_NAME} |"
+          } >> "${GITHUB_STEP_SUMMARY}"

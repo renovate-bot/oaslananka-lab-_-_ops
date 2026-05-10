@@ -2,6 +2,8 @@
 
 Generated from GitHub repository inventory on 2026-05-09.
 
+Updated on 2026-05-10 after the Group B pilot mirrors were created in `oaslananka-lab`.
+
 | Personal (source) | Org (CI/CD mirror) | Sync status |
 |---|---|---|
 | oaslananka/a2a-mesh | oaslananka-lab/a2a-mesh | pending (main -> main) |
@@ -11,6 +13,9 @@ Generated from GitHub repository inventory on 2026-05-09.
 | oaslananka/fovux | oaslananka-lab/fovux | pending (main -> main) |
 | oaslananka/kicad-mcp-pro | oaslananka-lab/kicad-mcp-pro | pending (main -> main) |
 | oaslananka/kicad-studio | oaslananka-lab/kicad-studio | pending (main -> main) |
+| oaslananka/mcp-debug-recorder | oaslananka-lab/mcp-debug-recorder | onboarded (main -> main) |
+| oaslananka/mcp-health-monitor | oaslananka-lab/mcp-health-monitor | onboarded (main -> main) |
+| oaslananka/mcp-infra-lens | oaslananka-lab/mcp-infra-lens | onboarded (main -> main) |
 | oaslananka/mcp-ssh-tool | oaslananka-lab/mcp-ssh-tool | pending (main -> main) |
 | oaslananka/oaslananka.github.io | oaslananka-lab/oaslananka.github.io | pending (main -> main) |
 
@@ -37,9 +42,6 @@ Generated from GitHub repository inventory on 2026-05-09.
 | oaslananka/file-header-generator | main |
 | oaslananka/helix | main |
 | oaslananka/iotfleetops | main |
-| oaslananka/mcp-debug-recorder | main |
-| oaslananka/mcp-health-monitor | main |
-| oaslananka/mcp-infra-lens | main |
 | oaslananka/mcp-suite | main |
 | oaslananka/mhz14a-lib | main |
 | oaslananka/multimodel-comparator | main |

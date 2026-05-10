@@ -214,3 +214,53 @@ Skipped:
   - Group B rollout. boardguard pilot PR is green, but its merge still requires an explicit human merge step.
 
 Next: Merge boardguard PR #17 manually or explicitly authorize merge; after main contains the boardguard pilot changes, start Group B one repo at a time.
+
+## 2026-05-10 - Group B MCP pilot onboarding completed
+
+Completed: 2026-05-10T10:00:00+03:00
+
+Applied:
+  - Created missing organization mirrors:
+    - `oaslananka-lab/mcp-debug-recorder`
+    - `oaslananka-lab/mcp-infra-lens`
+  - Verified `oaslananka-lab/mcp-health-monitor` already existed.
+  - Ran `_ops` onboarding, audit, baseline apply, ruleset profile, and release-plan workflows for:
+    - `oaslananka-lab/mcp-health-monitor`
+    - `oaslananka-lab/mcp-debug-recorder`
+    - `oaslananka-lab/mcp-infra-lens`
+  - Applied the MCP production baseline to all three repositories:
+    - CI, Security, CodeQL, Scorecard, Release, Labeler, and Stale workflows.
+    - Renovate and Mergify maintenance config.
+    - Non-blocking Codecov and SonarQube signals.
+    - Release-please config and manifest.
+    - `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CODEOWNERS`, `Taskfile.yml`, metadata validation, and package/repository metadata.
+  - Preserved `mcp-infra-lens` Azure Pipelines topology and existing agent docs while making GitHub Actions the organization CI authority.
+  - Fixed the `mcp-health-monitor` CodeQL `js/incomplete-sanitization` alert in `scripts/prepublish-check.mjs`; follow-up CodeQL and audit now report zero open code scanning alerts.
+  - Added `_ops` `repo-multi-onboarding.yml` for parallel Group B onboarding dispatch.
+  - Added accepted-findings records for all three Group B repositories.
+  - Updated architecture, mirror map, README, AGENTS, and Doppler docs for the Group B scope.
+
+Validation:
+  - `mcp-health-monitor` CI: https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366097
+  - `mcp-health-monitor` Security: https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366094
+  - `mcp-health-monitor` CodeQL: https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366100
+  - `mcp-health-monitor` Release: https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366098
+  - `mcp-health-monitor` Scorecard: https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25622366095
+  - `mcp-health-monitor` final audit: https://github.com/oaslananka-lab/_ops/actions/runs/25622403010
+  - `mcp-debug-recorder` CI: https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930580
+  - `mcp-debug-recorder` Security: https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930583
+  - `mcp-debug-recorder` CodeQL: https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930571
+  - `mcp-debug-recorder` Release: https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930575
+  - `mcp-debug-recorder` Scorecard: https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25621930578
+  - `mcp-infra-lens` CI: https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173448
+  - `mcp-infra-lens` Security: https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173453
+  - `mcp-infra-lens` CodeQL: https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173438
+  - `mcp-infra-lens` Release: https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173437
+  - `mcp-infra-lens` Scorecard: https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25622173446
+
+Skipped:
+  - Auto-merge and production publish.
+  - Strict required-review branch protection.
+  - Bulk rollout beyond the named Group B pilot repositories.
+
+Next: Run `repo-multi-onboarding.yml` once from `_ops` main after this documentation/workflow commit is pushed, then continue with any explicitly approved production rollout.
