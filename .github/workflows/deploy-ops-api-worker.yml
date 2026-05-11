@@ -48,7 +48,31 @@ jobs:
       - name: Lint
         run: corepack pnpm run lint
 
+      - name: Check Cloudflare deploy secrets
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          if [[ -n "${CLOUDFLARE_API_TOKEN}" && -n "${CLOUDFLARE_ACCOUNT_ID}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare deploy secrets are present." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "Cloudflare deploy skipped."
+              echo ""
+              echo "Missing required _ops repository secrets:"
+              echo "- CLOUDFLARE_API_TOKEN"
+              echo "- CLOUDFLARE_ACCOUNT_ID"
+              echo ""
+              echo "Manual wrangler deploy remains the validated deployment path."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Deploy Worker
+        if: steps.cf.outputs.enabled == 'true'
         run: corepack pnpm exec wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
