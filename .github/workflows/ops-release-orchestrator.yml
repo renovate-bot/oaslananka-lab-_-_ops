@@ -217,6 +217,17 @@ jobs:
             ' "${RAW}/release-workflow-runs.json"
           }
 
+          find_preferred_workflow() {
+            local paths_json="$1"
+            jq -r --argjson paths "${paths_json}" '
+              .workflows as $workflows |
+              $paths[] as $path |
+              $workflows[]? |
+              select(.path == $path) |
+              .path
+            ' "${RAW}/workflows.json" | head -n 1
+          }
+
           watch_release_run() {
             local run_id="$1"
             [[ -n "${run_id}" ]] || return 1
@@ -349,8 +360,24 @@ jobs:
             record "release_plan" "success" "run_id=${release_plan_run_id}"
 
             target_api --method GET "repos/${REPO}/actions/workflows" -F per_page=100 > "${RAW}/workflows.json"
-            release_workflow="$(jq -r '.workflows[]? | select(.path == ".github/workflows/release.yml" or .path == ".github/workflows/release-please.yml") | .path' "${RAW}/workflows.json" | head -n 1)"
-            publish_workflow="$(jq -r '.workflows[]? | select(.path == ".github/workflows/publish.yml" or .path == ".github/workflows/npm-publish.yml" or .path == ".github/workflows/marketplace-publish.yml") | .path' "${RAW}/workflows.json" | head -n 1)"
+            release_workflow="$(find_preferred_workflow '[
+              ".github/workflows/release.yml",
+              ".github/workflows/release-please.yml"
+            ]')"
+            publish_workflow="$(find_preferred_workflow '[
+              ".github/workflows/publish-production.yml",
+              ".github/workflows/publish.yml",
+              ".github/workflows/npm-publish.yml",
+              ".github/workflows/marketplace-publish.yml",
+              ".github/workflows/vscode-publish.yml",
+              ".github/workflows/open-vsx-publish.yml",
+              ".github/workflows/mcp-registry-publish.yml",
+              ".github/workflows/release.yml",
+              ".github/workflows/release-please.yml"
+            ]')"
+            if [[ -n "${publish_workflow}" ]]; then
+              record "publish_workflow" "found" "${publish_workflow}"
+            fi
 
             if [[ "${release_requested}" == "true" ]]; then
               if [[ -z "${release_workflow}" ]]; then
@@ -417,9 +444,63 @@ jobs:
               publish_state="dry_run"
               record "publish_workflow" "dry_run" "${publish_workflow}"
             else
-              final_state="awaiting_environment_approval"
-              publish_state="awaiting_environment_approval"
-              record "publish" "environment_gated" "$(jq -r '.publish.require_environment' "${OUT}/policy.json")"
+              publish_ref="${MERGE_COMMIT_SHA}"
+              if [[ -z "${publish_ref}" ]]; then
+                target_api --method GET "repos/${REPO}/commits/main" > "${RAW}/publish-ref-commit.json"
+                publish_ref="$(jq -r '.sha // empty' "${RAW}/publish-ref-commit.json")"
+              fi
+              if [[ ! "${publish_ref}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                final_state="publish_workflow_failed"
+                publish_state="publish_ref_unresolved"
+                record "publish_workflow" "publish_ref_unresolved" "could not resolve immutable main commit SHA"
+                exit 0
+              fi
+              before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+              if [[ "${publish_workflow}" == ".github/workflows/publish-production.yml" ]]; then
+                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref "${publish_ref}" -f ref="${publish_ref}" 2> "${RAW}/publish-workflow-dispatch.err"; then
+                  final_state="publish_workflow_failed"
+                  publish_state="publish_workflow_dispatch_failed"
+                  record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
+                fi
+              else
+                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main 2> "${RAW}/publish-workflow-dispatch.err"; then
+                  final_state="publish_workflow_failed"
+                  publish_state="publish_workflow_dispatch_failed"
+                  record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
+                fi
+              fi
+              if [[ "${publish_state}" != "publish_workflow_dispatch_failed" ]]; then
+                sleep 8
+                publish_workflow_run_id="$(target_gh run list --repo "${REPO}" --workflow "${publish_workflow}" --limit 10 --json databaseId,createdAt |
+                  jq -r --arg before "${before}" 'map(select(.createdAt >= $before)) | first.databaseId // .[0].databaseId // empty')"
+                if [[ -z "${publish_workflow_run_id}" ]]; then
+                  final_state="publish_workflow_dispatched"
+                  publish_state="publish_workflow_dispatched"
+                  record "publish_workflow" "dispatched" "${publish_workflow} run_id="
+                else
+                  set +e
+                  watch_release_run "${publish_workflow_run_id}"
+                  publish_rc="$?"
+                  set -e
+                  case "${publish_rc}" in
+                    0)
+                      final_state="release_publish_complete"
+                      publish_state="published"
+                      record "publish_workflow" "success" "${publish_workflow} run_id=${publish_workflow_run_id}"
+                      ;;
+                    3)
+                      final_state="awaiting_environment_approval"
+                      publish_state="awaiting_environment_approval"
+                      record "publish_workflow" "awaiting_environment_approval" "${publish_workflow} run_id=${publish_workflow_run_id}"
+                      ;;
+                    *)
+                      final_state="publish_workflow_failed"
+                      publish_state="publish_workflow_failed"
+                      record "publish_workflow" "failed" "${publish_workflow} run_id=${publish_workflow_run_id}"
+                      ;;
+                  esac
+                fi
+              fi
             fi
           fi
 

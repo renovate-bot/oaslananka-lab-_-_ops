@@ -1,0 +1,84 @@
+name: Repo Production Environment Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      apply:
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-production-environment-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Create target GitHub App token
+        id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Ensure production environment
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          APPLY: ${{ inputs.apply }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          args=(--owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" --environment production --reviewer-login oaslananka)
+          if [[ "${APPLY}" == "true" ]]; then
+            args+=(--apply)
+          fi
+          set +e
+          node scripts/ensure-production-environment.mjs "${args[@]}" > "out/production-environment-${TARGET_OWNER}-${TARGET_REPO}.json"
+          rc="$?"
+          set -e
+          final_state="$(jq -r '.final_state // "unknown"' "out/production-environment-${TARGET_OWNER}-${TARGET_REPO}.json")"
+          {
+            echo "### Repo Production Environment Audit"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${TARGET_OWNER}/${TARGET_REPO} |"
+            echo "| Final state | ${final_state} |"
+            echo "| Required secrets | $(jq -r '.required_secret_names | join(", ")' "out/production-environment-${TARGET_OWNER}-${TARGET_REPO}.json") |"
+            echo "| Missing secrets | $(jq -r '.missing_secret_names | join(", ")' "out/production-environment-${TARGET_OWNER}-${TARGET_REPO}.json") |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${rc}"
+
+      - name: Upload production environment audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-environment-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14
