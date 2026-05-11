@@ -366,17 +366,22 @@ jobs:
             local repo_dir="$1"
             local publish_dir="${repo_dir}/.github/workflows"
             mkdir -p "${publish_dir}"
+            render_template() {
+              local source_template="$1"
+              local destination="$2"
+              sed "s#__TARGET_REPOSITORY__#${TARGET_OWNER}/${TARGET_REPO}#g" "${source_template}" > "${destination}"
+            }
             if [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
-              cp "${GITHUB_WORKSPACE}/templates/publish-production-npm.yml" "${publish_dir}/publish-production.yml"
+              render_template "${GITHUB_WORKSPACE}/templates/publish-production-npm.yml" "${publish_dir}/publish-production.yml"
             fi
             if { [[ "$(jq -r '.publish.vscode_marketplace // false' "${OUT}/policy.json")" == "true" ]] || [[ "$(jq -r '.publish.open_vsx // false' "${OUT}/policy.json")" == "true" ]]; } && [[ ! -f "${publish_dir}/publish-production.yml" ]]; then
-              cp "${GITHUB_WORKSPACE}/templates/publish-production-vsce.yml" "${publish_dir}/publish-production.yml"
+              render_template "${GITHUB_WORKSPACE}/templates/publish-production-vsce.yml" "${publish_dir}/publish-production.yml"
             fi
             if [[ "$(jq -r '.publish.mcp_registry // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/mcp-registry.yml" ]]; then
-              cp "${GITHUB_WORKSPACE}/templates/mcp-registry.yml" "${publish_dir}/mcp-registry.yml"
+              render_template "${GITHUB_WORKSPACE}/templates/mcp-registry.yml" "${publish_dir}/mcp-registry.yml"
             fi
             if [[ "$(jq -r '.publish.github_pages // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/deploy-pages.yml" ]]; then
-              cp "${GITHUB_WORKSPACE}/templates/deploy-pages.yml" "${publish_dir}/deploy-pages.yml"
+              render_template "${GITHUB_WORKSPACE}/templates/deploy-pages.yml" "${publish_dir}/deploy-pages.yml"
             fi
           }
 

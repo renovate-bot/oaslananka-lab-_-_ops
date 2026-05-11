@@ -17,22 +17,30 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: publish-production-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   vscode-marketplace:
+    if: ${{ github.repository == '__TARGET_REPOSITORY__' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
       - run: corepack enable
       - run: |
-          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; elif [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else npm install; fi
       - run: npm run build --if-present
       - name: Validate extension manifest
         run: |
@@ -47,20 +55,21 @@ jobs:
           npx --yes @vscode/vsce publish --pat "$token"
 
   open-vsx:
+    if: ${{ github.repository == '__TARGET_REPOSITORY__' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
       - run: corepack enable
       - run: |
-          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; elif [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else npm install; fi
       - run: npm run build --if-present
       - name: Publish Open VSX
         env:

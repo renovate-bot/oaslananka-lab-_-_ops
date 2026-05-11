@@ -201,6 +201,40 @@ jobs:
             commits_synced="$(git rev-list --count "${source_sha}" "^${target_sha_before}" 2>/dev/null || git rev-list --count "${source_sha}")"
           fi
 
+          open_sync_pr() {
+            local branch="repo-ops/sync-${SOURCE_REPO}-${source_sha:0:12}"
+            local branch_ref="refs/heads/${branch}"
+            local title="sync: mirror ${SOURCE_FULL}@${source_sha:0:12}"
+            local body
+            body="$(printf 'Source/mirror policy detected drift from %s to %s.\n\nThis PR was opened by the control-plane because the mirror default branch is protected and direct sync is not allowed.\n\nSource commit: %s\nTarget before: %s\n' \
+              "${SOURCE_FULL}" \
+              "${TARGET_FULL}" \
+              "${source_sha}" \
+              "${target_sha_before:-none}")"
+
+            git push target "refs/remotes/origin/${default_branch}:${branch_ref}" --force-with-lease || \
+              git push target "refs/remotes/origin/${default_branch}:${branch_ref}" --force
+
+            existing_pr="$(target_api --method GET "repos/${TARGET_FULL}/pulls" \
+              -f state=open \
+              -f head="${TARGET_OWNER}:${branch}" \
+              -f base="${default_branch}" \
+              --jq '.[0].html_url // ""')"
+            if [[ -z "${existing_pr}" ]]; then
+              pr_payload="$(jq -n \
+                --arg title "${title}" \
+                --arg body "${body}" \
+                --arg head "${branch}" \
+                --arg base "${default_branch}" \
+                '{title:$title,body:$body,head:$head,base:$base,maintainer_can_modify:true}')"
+              pr_url="$(target_api --method POST "repos/${TARGET_FULL}/pulls" --input <(printf '%s' "${pr_payload}") --jq '.html_url')"
+            else
+              pr_url="${existing_pr}"
+            fi
+            status="sync_pr_opened"
+            record "default_branch" "sync_pr_opened" "${pr_url}"
+          }
+
           if [[ "${target_sha_before}" == "${source_sha}" ]]; then
             status="up_to_date"
             relation="equal"
@@ -213,23 +247,36 @@ jobs:
               record "default_branch" "up_to_date_tree_equal" "${default_branch} content already matches source ${source_sha}; target head remains ${target_sha_before}"
             elif [[ -n "${target_sha_before}" ]] && git merge-base --is-ancestor "${target_sha_before}" "${source_sha}"; then
               relation="mirror_behind"
-              git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+              if git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"; then
+                status="synced"
+                record "default_branch" "synced" "${default_branch}@${source_sha}"
+              else
+                open_sync_pr
+              fi
             elif [[ -n "${target_sha_before}" ]]; then
               relation="diverged"
               record "default_branch" "force_push_blocked" "${TARGET_FULL}/${default_branch} diverged from ${SOURCE_FULL}/${default_branch}; refusing force-push"
-              status="sync_pr_required"
+              open_sync_pr
             else
               relation="initial_push"
-              git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+              if git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"; then
+                status="synced"
+                record "default_branch" "synced" "${default_branch}@${source_sha}"
+              else
+                open_sync_pr
+              fi
             fi
-            if [[ "${status}" != "up_to_date_tree_equal" && "${status}" != "sync_pr_required" ]]; then
+            if [[ "${status}" != "up_to_date_tree_equal" && "${status}" != "sync_pr_opened" && "${status}" != "synced" ]]; then
               status="synced"
               record "default_branch" "synced" "${default_branch}@${source_sha}"
             fi
           fi
 
-          git push --tags target
-          record "tags" "synced" "Pushed source tags to target."
+          if git push --tags target; then
+            record "tags" "synced" "Pushed source tags to target."
+          else
+            record "tags" "sync_failed" "Tag sync failed; default branch sync status remains ${status}."
+          fi
 
           target_sha_after="$(git ls-remote target "refs/heads/${default_branch}" | awk '{print $1}' || true)"
 

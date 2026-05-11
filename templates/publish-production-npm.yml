@@ -17,16 +17,24 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: publish-production-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify-package:
+    if: ${{ github.repository == '__TARGET_REPOSITORY__' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
@@ -37,23 +45,24 @@ jobs:
           node -e "const p=require('./package.json'); if(!p.name||!p.version){throw new Error('NPM_PACKAGE_METADATA_MISSING')}"
 
   npm-publish:
+    if: ${{ github.repository == '__TARGET_REPOSITORY__' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: verify-package
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       - run: npm install -g npm@latest
       - name: Install dependencies
         run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if [ -f pnpm-lock.yaml ]; then corepack enable && corepack pnpm install --frozen-lockfile; else npm install; fi
       - name: Build
         run: npm run build --if-present
       - name: Test
