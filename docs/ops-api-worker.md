@@ -99,6 +99,14 @@ REPO_OPS_APP_PRIVATE_KEY
 
 No endpoint returns secret values. Logs must contain metadata only.
 
+Current secret state:
+
+```text
+GitHub Actions _ops secret REPO_OPS_APP_PRIVATE_KEY exists.
+Doppler all/main REPO_OPS_APP_PRIVATE_KEY is missing.
+Cloudflare Worker REPO_OPS_APP_PRIVATE_KEY is therefore not configured.
+```
+
 ## CORS
 
 Allowed browser origins are intentionally narrow:

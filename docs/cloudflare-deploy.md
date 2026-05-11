@@ -68,3 +68,11 @@ CLOUDFLARE_ACCOUNT_ID
 ```
 
 If these are absent, manual `wrangler deploy` remains the validated deployment path.
+
+Current CI state:
+
+```text
+deploy-ops-api-worker.yml succeeded and skipped deploy because these _ops repository secrets are absent:
+- CLOUDFLARE_API_TOKEN
+- CLOUDFLARE_ACCOUNT_ID
+```

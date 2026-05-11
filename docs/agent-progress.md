@@ -384,6 +384,11 @@ Applied:
 Validation:
   - Policy topology tests passed locally.
   - Worker typecheck, tests, lint, dry-run deploy, deploy, and health check passed locally.
+  - Deploy workflow succeeded and skipped Cloudflare deploy because CI Cloudflare secrets are absent.
+  - `repo-topology-audit.yml` for boardguard succeeded with `mirror_ahead`.
+  - `repo-source-mirror-release-gate.yml` for boardguard succeeded with `promote_back_required`.
+  - `repo-promote-back.yml` for boardguard succeeded in `dry_run_clean`.
 
 Known blocker:
   - `REPO_OPS_APP_PRIVATE_KEY` is not present in Doppler `all/main`; authenticated Worker workflow-dispatch endpoints cannot mutate repositories until that secret is supplied to Cloudflare.
+  - `_ops` repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are absent; GitHub Actions deploy is configured to skip deploy and report the missing secret names.

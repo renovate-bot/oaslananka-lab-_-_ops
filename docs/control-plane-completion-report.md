@@ -874,3 +874,24 @@ REPO_OPS_APP_PRIVATE_KEY is not present in Doppler all/main.
 Cloudflare Worker health and OAuth start work.
 Authenticated workflow dispatch endpoints need the GitHub App private key secret before repository mutation can work from ops-api.
 ```
+
+Final validation:
+
+```text
+Implementation commit:        74e29b1660337bcbffc964011ff9264a1c92ed40
+Worker manual deploy:         success, health 200
+Worker deploy workflow:       https://github.com/oaslananka-lab/_ops/actions/runs/25645859528
+Topology audit boardguard:    https://github.com/oaslananka-lab/_ops/actions/runs/25645940068  final_state=mirror_ahead
+Release gate boardguard:      https://github.com/oaslananka-lab/_ops/actions/runs/25645923800  final_state=promote_back_required
+Promote-back dry-run:         https://github.com/oaslananka-lab/_ops/actions/runs/25645947205  final_state=dry_run_clean
+OAuth start:                  302 to github.com with scope read:user user:email
+OAuth full callback:          requires interactive GitHub browser login
+```
+
+CI deploy note:
+
+```text
+deploy-ops-api-worker.yml is green.
+It skips Cloudflare deploy when _ops repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are absent.
+Manual wrangler deploy is the current validated deploy path.
+```
