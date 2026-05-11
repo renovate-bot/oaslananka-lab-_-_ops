@@ -37,7 +37,7 @@ jobs:
       - name: Install
         run: |
           corepack enable
-          corepack pnpm install --frozen-lockfile
+          corepack pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Typecheck
         run: corepack pnpm run typecheck
