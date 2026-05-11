@@ -63,11 +63,15 @@ OAuth identity:
 
 ```text
 OAuth App: oaslananka-ops-chatgpt-login
-Client ID: 0v231iqSLGaTAf3RzNG6
+Client ID prefix: Ov231...
 Callback: https://ops-api.oaslananka.dev/oauth/github/callback
 Scopes: read:user user:email
 Allowed login: oaslananka
 ```
+
+The OAuth Client ID starts with capital `O`, not zero. It is distinct from the `oaslananka-repo-ops` GitHub App Client ID.
+
+The OAuth Client Secret was rotated after accidental URL exposure. Only secret names and storage locations are documented; secret values are not recorded.
 
 Mutation authority:
 

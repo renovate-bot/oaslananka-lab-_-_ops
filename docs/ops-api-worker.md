@@ -58,7 +58,7 @@ Repository mutation authority remains in the `oaslananka-repo-ops` GitHub App an
 | `POST` | `/v1/workflows/dispatch` | session | Allowlisted raw workflow dispatch. |
 | `POST` | `/v1/repos/:repo/sync-source-to-mirror` | session | Typed dispatch to `repo-mirror-sync.yml`. |
 | `POST` | `/v1/repos/:repo/topology-audit` | session | Typed dispatch to `repo-topology-audit.yml`. |
-| `POST` | `/v1/repos/:repo/promote-back` | session | Typed dry-run dispatch to `repo-promote-back.yml`. |
+| `POST` | `/v1/repos/:repo/promote-back` | session | Typed dispatch to `repo-promote-back.yml`; defaults to `dry_run` and accepts `dry_run`, `pull_request`, or `update_existing_pr`. |
 | `POST` | `/v1/pr/:owner/:repo/:number/diagnose` | session | Typed dispatch to `agent-pr-diagnostics.yml`. |
 | `POST` | `/v1/pr/:owner/:repo/:number/fix` | session | Typed dispatch to `agent-fix-loop.yml`. |
 | `POST` | `/v1/pr/:owner/:repo/:number/finalize` | session | Typed dispatch to `ops-pr-finalize.yml`. |
@@ -103,9 +103,45 @@ Current secret state:
 
 ```text
 GitHub Actions _ops secret REPO_OPS_APP_PRIVATE_KEY exists.
-Doppler all/main REPO_OPS_APP_PRIVATE_KEY is missing.
-Cloudflare Worker REPO_OPS_APP_PRIVATE_KEY is therefore not configured.
+Doppler all/main REPO_OPS_APP_PRIVATE_KEY exists.
+Cloudflare Worker REPO_OPS_APP_PRIVATE_KEY is configured.
+GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are configured as Worker secrets.
+No secret values are recorded in this repository.
 ```
+
+OAuth identity note:
+
+```text
+OAuth App: oaslananka-ops-chatgpt-login
+OAuth Client ID prefix: Ov231...
+The first character is capital O, not zero.
+The OAuth App Client ID is distinct from the oaslananka-repo-ops GitHub App Client ID.
+The OAuth Client Secret was rotated after accidental URL exposure; only secret names and storage locations are documented.
+```
+
+## Promote-Back Endpoint
+
+`POST /v1/repos/:repo/promote-back` accepts an optional JSON body:
+
+```json
+{
+  "mode": "dry_run",
+  "merge_source_pr": "false",
+  "mirror_ref": "main",
+  "source_owner": "oaslananka",
+  "source_repo": "boardguard"
+}
+```
+
+Supported modes:
+
+```text
+dry_run
+pull_request
+update_existing_pr
+```
+
+An empty body dispatches a safe dry-run. Invalid modes return HTTP 400 with `INVALID_PROMOTE_MODE` and do not dispatch any workflow.
 
 ## CORS
 

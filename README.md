@@ -9,6 +9,8 @@ Repository operations control plane for CI/CD, automation, release orchestration
 
 Validated mirror changes are not canonical until promoted back to `oaslananka/*`, unless a repository policy explicitly says mirror-only closeout is allowed.
 
+After promote-back, source and mirror commit SHAs can differ because canonical source PRs may be squash-merged. `_ops` treats identical source/mirror trees as `tree_equal`, which is a valid release-gate state and avoids protected-branch force-pushes.
+
 Synchronization is one way:
 
 ```text

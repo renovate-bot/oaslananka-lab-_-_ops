@@ -389,6 +389,33 @@ Validation:
   - `repo-source-mirror-release-gate.yml` for boardguard succeeded with `promote_back_required`.
   - `repo-promote-back.yml` for boardguard succeeded in `dry_run_clean`.
 
-Known blocker:
-  - `REPO_OPS_APP_PRIVATE_KEY` is not present in Doppler `all/main`; authenticated Worker workflow-dispatch endpoints cannot mutate repositories until that secret is supplied to Cloudflare.
-  - `_ops` repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are absent; GitHub Actions deploy is configured to skip deploy and report the missing secret names.
+Resolved blocker:
+  - `REPO_OPS_APP_PRIVATE_KEY` is now present for the Worker runtime; authenticated Worker workflow-dispatch endpoints can dispatch `_ops` workflows.
+
+Remaining deploy note:
+  - `_ops` repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are absent; GitHub Actions deploy is configured to skip deploy and report the missing secret names. Manual `wrangler deploy` remains the validated deploy path.
+
+## 2026-05-11 - boardguard promote-back source closeout
+
+Applied:
+  - Parameterized `POST /v1/repos/:repo/promote-back` so empty bodies remain safe dry-runs and explicit bodies can request `pull_request`, `update_existing_pr`, and `merge_source_pr=true`.
+  - Added request validation for invalid promote-back modes. Invalid input returns HTTP 400 `INVALID_PROMOTE_MODE` and does not dispatch `_ops`.
+  - Fixed promote-back idempotency so rerunning `update_existing_pr` against an already-updated promote branch can merge the existing source PR instead of reapplying the same diff.
+  - Updated mirror sync, topology audit, and source/mirror release gate to accept `tree_equal` as a valid post-promote state. This avoids force-pushes when source and mirror trees match but commit SHAs differ because of squash merges.
+
+Validation:
+  - Worker typecheck/tests/dry-run deploy/deploy passed.
+  - Worker health returned ok.
+  - `/v1/me` returned `authenticated=true`, `login=oaslananka`, `id=169144131`.
+  - Promote-back dry-run: https://github.com/oaslananka-lab/_ops/actions/runs/25647383882
+  - Promote-back source PR: https://github.com/oaslananka-lab/_ops/actions/runs/25647400895
+  - Promote-back source merge: https://github.com/oaslananka-lab/_ops/actions/runs/25647485883
+  - Source PR merged: https://github.com/oaslananka/boardguard/pull/1, merge commit `dbd7f9ca6794f48b9910c8233afda90d1411306f`.
+  - Source-to-mirror sync: https://github.com/oaslananka-lab/_ops/actions/runs/25647598838, `sync_status=up_to_date_tree_equal`.
+  - Final topology audit: https://github.com/oaslananka-lab/_ops/actions/runs/25647613624, `final_state=ready`, `relation=tree_equal`.
+  - Release gate: https://github.com/oaslananka-lab/_ops/actions/runs/25647633273, `final_state=release_dispatched`, `relation=tree_equal`.
+  - Release orchestrator: https://github.com/oaslananka-lab/_ops/actions/runs/25647637494, `final_state=release_pr_open_merge_disabled`, `publish_state=publish_disabled`.
+
+Policy state:
+  - `release.merge_release_pr=false`; release PR #18 remains open by policy.
+  - `publish.enabled=false`; no production publish was performed.

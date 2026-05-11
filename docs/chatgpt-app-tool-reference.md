@@ -31,3 +31,29 @@ accepted
 ```
 
 No tool may return tokens, private keys, OAuth secrets, session secrets, Doppler values, or registry secrets.
+
+## Promote-Back Tool Body
+
+The `promote_back_to_source` tool maps to `POST /v1/repos/:repo/promote-back`.
+
+Accepted body:
+
+```json
+{
+  "mode": "dry_run",
+  "merge_source_pr": "false",
+  "mirror_ref": "main",
+  "source_owner": "oaslananka",
+  "source_repo": "boardguard"
+}
+```
+
+`mode` must be one of:
+
+```text
+dry_run
+pull_request
+update_existing_pr
+```
+
+`merge_source_pr` is explicit. The API never merges a canonical source PR unless the request supplies `true` or `"true"` and policy permits the merge. Invalid modes return `INVALID_PROMOTE_MODE` and do not dispatch `_ops`.

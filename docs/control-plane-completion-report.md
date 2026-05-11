@@ -867,12 +867,12 @@ OpenAI/Cloudflare/GitHub docs verified in:
 docs/chatgpt-app-ops-console.md
 ```
 
-Current blocker:
+Resolved blocker:
 
 ```text
-REPO_OPS_APP_PRIVATE_KEY is not present in Doppler all/main.
-Cloudflare Worker health and OAuth start work.
-Authenticated workflow dispatch endpoints need the GitHub App private key secret before repository mutation can work from ops-api.
+REPO_OPS_APP_PRIVATE_KEY is present for the Worker runtime.
+Cloudflare Worker health, OAuth, and authenticated workflow dispatch all work.
+Repository mutation from ops-api reaches _ops workflow_dispatch and then uses the GitHub App installation token.
 ```
 
 Final validation:
@@ -894,4 +894,93 @@ CI deploy note:
 deploy-ops-api-worker.yml is green.
 It skips Cloudflare deploy when _ops repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are absent.
 Manual wrangler deploy is the current validated deploy path.
+```
+
+---
+
+## 18. Update - promote-back source closeout
+
+Generated: 2026-05-11
+
+Code changes:
+
+```text
+services/ops_api_worker/src/routes/promote.ts
+services/ops_api_worker/src/schemas.ts
+services/ops_api_worker/test/routes.test.ts
+.github/workflows/repo-promote-back.yml
+.github/workflows/repo-mirror-sync.yml
+.github/workflows/repo-topology-audit.yml
+.github/workflows/repo-source-mirror-release-gate.yml
+```
+
+Worker/API validation:
+
+```text
+Worker deploy version:     6187d711-2f7b-4f17-b636-a54b5f9994bc
+Health:                    https://ops-api.oaslananka.dev/health  ok
+OAuth /v1/me:              authenticated=true, login=oaslananka, id=169144131
+OAuth Client ID:           starts with Ov231... (capital O, not zero)
+OAuth secret handling:     rotated after accidental URL exposure; no values recorded
+Mutation authority:        _ops workflow_dispatch + GitHub App installation token
+OAuth repo mutation:       no
+```
+
+Promote-back API behavior:
+
+```text
+Empty body default:        dry_run
+Allowed modes:             dry_run, pull_request, update_existing_pr
+Invalid mode result:       HTTP 400 INVALID_PROMOTE_MODE; no workflow dispatch
+merge_source_pr default:   false
+merge_source_pr=true:      explicit source PR merge request
+```
+
+Validation commands:
+
+```text
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run typecheck
+pnpm test
+pnpm exec wrangler deploy --dry-run
+pnpm exec wrangler deploy
+node --test tests/ops-policy.test.mjs tests/ops-policy-topology.test.mjs
+actionlint .github/workflows/repo-promote-back.yml
+actionlint .github/workflows/repo-mirror-sync.yml .github/workflows/repo-topology-audit.yml .github/workflows/repo-source-mirror-release-gate.yml
+```
+
+Source closeout:
+
+```text
+Source repo:               oaslananka/boardguard
+Mirror repo:               oaslananka-lab/boardguard
+Source PR:                 https://github.com/oaslananka/boardguard/pull/1
+Promote dry-run:           https://github.com/oaslananka-lab/_ops/actions/runs/25647383882  final_state=dry_run_clean
+Promote pull_request:      https://github.com/oaslananka-lab/_ops/actions/runs/25647400895  final_state=source_pr_opened
+Promote merge retry:       https://github.com/oaslananka-lab/_ops/actions/runs/25647438736  final_state=promote_failed (idempotency bug fixed)
+Promote source merge:      https://github.com/oaslananka-lab/_ops/actions/runs/25647485883  final_state=source_pr_merged
+Source merge commit:       dbd7f9ca6794f48b9910c8233afda90d1411306f
+```
+
+Mirror resync and release gate:
+
+```text
+Mirror sync before fix:    https://github.com/oaslananka-lab/_ops/actions/runs/25647492771  blocked by no-force-push ruleset
+Mirror sync after fix:     https://github.com/oaslananka-lab/_ops/actions/runs/25647598838  sync_status=up_to_date_tree_equal
+Topology audit:            https://github.com/oaslananka-lab/_ops/actions/runs/25647613624  final_state=ready relation=tree_equal
+Release gate:              https://github.com/oaslananka-lab/_ops/actions/runs/25647633273  final_state=release_dispatched relation=tree_equal
+Release orchestrator:      https://github.com/oaslananka-lab/_ops/actions/runs/25647637494  final_state=release_pr_open_merge_disabled
+Release plan:              https://github.com/oaslananka-lab/_ops/actions/runs/25647641210
+Release PR:                https://github.com/oaslananka-lab/boardguard/pull/18
+Publish state:             publish_disabled
+```
+
+Policy result:
+
+```text
+Source/mirror closeout:    complete for boardguard content; relation=tree_equal
+Release PR auto-merge:     disabled by policy release.merge_release_pr=false
+Publish:                   disabled by policy publish.enabled=false
+No production publish:     performed
+No secret values:          printed or recorded
 ```

@@ -62,6 +62,21 @@ No workflow may force-push canonical source branches.
 
 Release/publish is allowed only when the policy permits it and the source/mirror relationship is valid.
 
-For mirrored repositories, a mirror commit must contain the canonical source commit, or the validated mirror change must be promoted back according to policy.
+For mirrored repositories, a mirror commit must contain the canonical source commit, have the same repository tree as the canonical source commit, or the validated mirror change must be promoted back according to policy.
 
 For source repositories, release is delegated to the mirror and must be backed by mirror validation.
+
+## Tree-Equivalent Closeout
+
+Promote-back source PRs are normally squash-merged into `oaslananka/*`.
+
+That means the canonical source commit SHA and CI/CD mirror commit SHA may differ even when their repository trees are identical. The lifecycle workflows treat this as:
+
+```text
+relation = tree_equal
+final_state = ready
+```
+
+`tree_equal` is valid for release gates because it proves the promoted source content and the mirror execution content are equivalent without requiring force-pushes or ruleset bypasses.
+
+Default-branch force-push is still refused. If source and mirror diverge and are not tree-equal, sync reports the exact unsafe state instead of rewriting protected history.
