@@ -188,8 +188,38 @@ jobs:
               echo "format/lint"
             elif [[ -s "${combined}" ]] && grep -Eiq 'Invalid workflow file|YAMLException|workflow syntax|mapping values are not allowed|did not find expected|bad indentation' "${combined}"; then
               echo "workflow syntax"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'actionlint|Unexpected input\(s\)|Unexpected input' "${combined}"; then
+              echo "actionlint failure"
             elif [[ -s "${combined}" ]] && grep -Eiq 'Resource not accessible by integration|permission denied|permissions?:.*(write|read)|requires.*permission' "${combined}"; then
               echo "simple permission"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'publish_workflow_not_found|publish workflow (missing|not found)|no supported publish workflow' "${combined}"; then
+              echo "publish workflow discovery missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'production environment (is )?(missing|not found)|environment_required_missing|environment.*production.*missing' "${combined}"; then
+              echo "environment required missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_PUBLISH_E404|npm ERR! code E404|npm ERR! 404' "${combined}" && grep -Eiq 'NODE_AUTH_TOKEN[^A-Za-z0-9_]*(empty|missing|not set)|empty NODE_AUTH_TOKEN' "${combined}"; then
+              echo "npm publish auth missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_TOKEN_SECRET_MISSING|NODE_AUTH_TOKEN.*(missing|not set)|npm ERR! code ENEEDAUTH|npm ERR! need auth|npm ERR! code E401' "${combined}"; then
+              echo "npm token secret missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_TRUSTED_PUBLISHING_NOT_CONFIGURED|trusted publishing.*not configured|provenance.*trusted publishing' "${combined}"; then
+              echo "npm trusted publishing missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_PACKAGE_NAME_UNAVAILABLE|package name.*(unavailable|reserved|already exists)' "${combined}"; then
+              echo "npm package name unavailable"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_REGISTRY_PERMISSION_DENIED|npm ERR! code E403|forbidden|permission.*npm' "${combined}"; then
+              echo "npm registry permission denied"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'MARKETPLACE_SECRET_MISSING|VSCE_PAT|VS_MARKETPLACE_TOKEN|vsce.*token.*missing|marketplace.*token.*missing' "${combined}"; then
+              echo "vscode marketplace secret missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'OPEN_VSX_SECRET_MISSING|OVSX_PAT|OPEN_VSX_TOKEN|open vsx.*token.*missing|ovsx.*token.*missing' "${combined}"; then
+              echo "open vsx secret missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'MCP_REGISTRY_CONFIG_MISSING|MCP registry config.*missing|mcp.*registry.*metadata.*missing' "${combined}"; then
+              echo "mcp registry config missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'MCP_REGISTRY_CREDENTIALS_MISSING|MCP_REGISTRY_TOKEN|mcp.*registry.*token.*missing|mcp.*registry.*credentials.*missing' "${combined}"; then
+              echo "mcp registry secret missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'HTTP 405.*code owner review|Waiting on code owner review|code owner review.*required' "${combined}"; then
+              echo "ruleset codeowner review required"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'RULESET_BYPASS_NOT_CONFIGURABLE_BY_API|ruleset.*bypass.*not configurable|bypass actor.*not configurable' "${combined}"; then
+              echo "ruleset bypass not configurable by api"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'CODEOWNER_APPROVAL_NOT_AUTOMATABLE_BY_APP|codeowner approval.*not automatable|self.approval.*not allowed' "${combined}"; then
+              echo "codeowner approval not automatable by app"
             elif [[ -s "${combined}" ]] && grep -Eiq 'pin.*action|unpinned|deprecated action|Node.js 20 actions are deprecated|uses:.*@[vV]?[0-9]' "${combined}"; then
               echo "action pin update"
             elif [[ -s "${combined}" ]] && grep -Eiq 'lockfile|frozen-lockfile|ERR_PNPM_OUTDATED_LOCKFILE|package-lock.json|pnpm-lock.yaml' "${combined}"; then
@@ -210,11 +240,32 @@ jobs:
               "workflow syntax")
                 printf '%s\n' "Inspect the failed workflow line, fix only the syntax error, then validate with actionlint before pushing."
                 ;;
+              "actionlint failure")
+                printf '%s\n' "Run actionlint against the changed workflow and fix invalid inputs or syntax without broadening workflow permissions."
+                ;;
               "simple permission")
                 printf '%s\n' "Add the smallest required permissions block to the affected workflow or job. Do not broaden repository permissions beyond the failed operation."
                 ;;
               "action pin update")
                 printf '%s\n' "Replace the deprecated or unpinned action reference with the current allowed pinned reference used by repository policy."
+                ;;
+              "publish workflow discovery missing")
+                printf '%s\n' "Add a supported production publish workflow or update release orchestrator discovery so publish policy maps to an existing workflow."
+                ;;
+              "environment required missing")
+                printf '%s\n' "Run the production environment audit/ensure workflow for the target repository and keep publish jobs gated by environment: production."
+                ;;
+              "npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied")
+                printf '%s\n' "Keep npm publishing on the protected production environment and report the exact registry/trusted-publishing/secret blocker without printing secret values."
+                ;;
+              "vscode marketplace secret missing"|"open vsx secret missing")
+                printf '%s\n' "Keep extension publishing on the protected production environment and report the exact marketplace secret name required."
+                ;;
+              "mcp registry config missing"|"mcp registry secret missing")
+                printf '%s\n' "Do not invent MCP registry metadata; report the missing config or credential name exactly."
+                ;;
+              "ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
+                printf '%s\n' "Attempt policy-permitted approval, ruleset bypass, or CODEOWNERS remediation; if GitHub blocks it, record the exact HTTP response and run URL."
                 ;;
               "review-thread patch")
                 printf '%s\n' "Apply only the one-line suggested change from the unresolved review thread, then rerun diagnostics."
@@ -325,7 +376,7 @@ jobs:
               "missing lockfile")
                 generate_lockfile_if_missing "${repo_dir}"
                 ;;
-              "workflow syntax"|"simple permission"|"action pin update"|"review-thread patch")
+              "workflow syntax"|"simple permission"|"action pin update"|"review-thread patch"|"actionlint failure"|"publish workflow discovery missing"|"environment required missing"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
                 return 2
                 ;;
               *)
