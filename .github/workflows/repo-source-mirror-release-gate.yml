@@ -211,7 +211,7 @@ jobs:
             if [[ "${publish_requested}" == "true" && "$(jq -r '.mirror.require_source_mirror_sha_match_before_publish' "${OUT}/policy.json")" == "true" ]]; then
               require_match=true
             fi
-            if [[ "${require_match}" == "true" && "${relation}" != "equal" && "${relation}" != "mirror_contains_source" ]]; then
+            if [[ "${require_match}" == "true" && "${relation}" != "equal" ]]; then
               if [[ "$(jq -r '.mirror.promote_back' "${OUT}/policy.json")" == "true" ]]; then
                 final_state="promote_back_required"
               else
