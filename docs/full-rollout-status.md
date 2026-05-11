@@ -34,6 +34,21 @@ e53ae5a2e673f126f900d5ea74a3ea3db84ac7c8
 
 ## Summary
 
+Current closeout supersedes the earlier blocker table below. The active final state as of 2026-05-11 is:
+
+| Repo | Topology | Release gate | Release orchestrator | Publish/deploy state | Remaining blocker |
+|---|---|---|---|---|---|
+| `boardguard` | ready/tree_equal | https://github.com/oaslananka-lab/_ops/actions/runs/25682135136 | https://github.com/oaslananka-lab/_ops/actions/runs/25682139216 | npm publish workflow exists; final run https://github.com/oaslananka-lab/boardguard/actions/runs/25682257627 failed with exact npm auth/trusted-publishing blocker | `NPM_TRUSTED_PUBLISHING_NOT_CONFIGURED`; `NPM_TOKEN_SECRET_MISSING` |
+| `kicad-studio` | ready/tree_equal | https://github.com/oaslananka-lab/_ops/actions/runs/25682147980 | https://github.com/oaslananka-lab/_ops/actions/runs/25682152731 | VS Code Marketplace and Open VSX publish succeeded at https://github.com/oaslananka-lab/kicad-studio/actions/runs/25682226343 | none |
+| `mcp-health-monitor` | ready/tree_equal | https://github.com/oaslananka-lab/_ops/actions/runs/25682161010 | https://github.com/oaslananka-lab/_ops/actions/runs/25682164994 | latest protected run waiting at https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25684043850; prior run https://github.com/oaslananka-lab/mcp-health-monitor/actions/runs/25683106571 failed with exact npm auth blocker | `AWAITING_PRODUCTION_ENVIRONMENT_APPROVAL`; then `NPM_TRUSTED_PUBLISHING_NOT_CONFIGURED` or `NPM_TOKEN_SECRET_MISSING` unless npm trusted publishing/secret is configured |
+| `mcp-debug-recorder` | ready/tree_equal | https://github.com/oaslananka-lab/_ops/actions/runs/25682173258 | https://github.com/oaslananka-lab/_ops/actions/runs/25682177577 | latest protected run waiting at https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25684067281; prior run https://github.com/oaslananka-lab/mcp-debug-recorder/actions/runs/25683116353 failed with exact npm auth blocker | `AWAITING_PRODUCTION_ENVIRONMENT_APPROVAL`; then `NPM_TRUSTED_PUBLISHING_NOT_CONFIGURED` or `NPM_TOKEN_SECRET_MISSING` unless npm trusted publishing/secret is configured |
+| `mcp-infra-lens` | ready/tree_equal | https://github.com/oaslananka-lab/_ops/actions/runs/25682185881 | https://github.com/oaslananka-lab/_ops/actions/runs/25682190070 | npm publish succeeded; MCP registry job failed at https://github.com/oaslananka-lab/mcp-infra-lens/actions/runs/25682261512 with registry publish command/config missing | `MCP_REGISTRY_CONFIG_MISSING`; exact emitted detail: `MCP_REGISTRY_PUBLISH_COMMAND_NOT_CONFIGURED` |
+| `test` | ready/tree_equal | release disabled | not required | smoke-only; publish disabled by policy | none |
+
+Production environments exist for every product mirror and were created/verified through `_ops` with GitHub App tokens. No target repository has a remaining `PUBLISH_WORKFLOW_NOT_FOUND` or `PRODUCTION_ENVIRONMENT_MISSING` blocker.
+
+Image-observed annotations were also addressed: the final boardguard and MCP publish workflow logs no longer show `Node.js 20 actions are deprecated` or `Unexpected input(s) 'package-manager-cache'`; action pins and setup-node inputs were updated before final publish reruns.
+
 | Repo | Topology | Release gate | Release orchestrator | Publish state | Remaining blocker |
 |---|---|---|---|---|---|
 | `boardguard` | `ready`, `tree_equal` | ready | `publish_workflow_not_found` | blocked | `publish_workflow_not_found` |

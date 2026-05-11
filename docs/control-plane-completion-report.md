@@ -78,6 +78,39 @@ Boardguard code-scanning triage summary:
 - Tool: `Scorecard`
 - `actionable_patch_count`: `0`
 - `process_policy_deferred_count`: `6`
+
+## 2026-05-11 Resume Closeout
+
+Additional control-plane commits:
+
+```text
+14bcfdc69fae1eb59bfc40153ca6191c8e290560 ops(agent): classify publish rollout failures
+24950600f3bea233bcfc5dce70292db8dafa7e27 ops(diagnostics): ignore optional external review quota status
+0562088e3b868ed526770a41c99f66410b527696 ops(policy): onboard next repository batch
+4b0066027ac32e06f3bedd5ff0ffa1866772ecbf ops(release): dispatch only supported publish workflows
+```
+
+The resumed pass closed the earlier internal blocker classes:
+
+```text
+PUBLISH_WORKFLOW_NOT_FOUND: eliminated for product repos by adding publish workflows in target repos and expanding orchestrator discovery.
+PRODUCTION_ENVIRONMENT_MISSING: eliminated where GitHub API permits creation; production environments now exist for product mirrors and next-batch publish-enabled mirrors.
+CLASSIFICATION_UNKNOWN: eliminated for known publish, environment, npm, marketplace, MCP registry, workflow syntax, actionlint, ruleset, and code-owner failure classes.
+Node.js 20 / package-manager-cache annotations: addressed in generated publish workflows and verified on final publish reruns.
+```
+
+Current accepted external states are registry/account configuration issues, not `_ops` implementation gaps:
+
+```text
+boardguard: npm trusted publishing or protected NPM_TOKEN/NODE_AUTH_TOKEN required.
+mcp-health-monitor: production environment approval pending; npm trusted publishing or protected NPM_TOKEN/NODE_AUTH_TOKEN required after approval.
+mcp-debug-recorder: production environment approval pending; npm trusted publishing or protected NPM_TOKEN/NODE_AUTH_TOKEN required after approval.
+mcp-infra-lens: npm publish succeeded; MCP registry publish command/config and MCP_REGISTRY_TOKEN are required.
+kicad-mcp-pro: MCP registry publish run is awaiting protected environment approval; MCP_REGISTRY_TOKEN is missing from production.
+mcp-ssh-tool: Docker smoke dispatch completed; npm/MCP registry release publishing requires production workflow/registry configuration plus NPM_TOKEN/NODE_AUTH_TOKEN or trusted publishing and MCP_REGISTRY_TOKEN.
+```
+
+Full per-repo evidence is recorded in `docs/full-rollout-status.md` and `docs/next-batch-rollout-status.md`.
 - `ruleset_or_review_model_count`: `1`
 - `manual_review_count`: `0`
 

@@ -78,6 +78,22 @@ repo-release-plan.yml
 repo-ruleset-autonomy-audit.yml
 repo-topology-audit.yml
 repo-promote-back.yml
+
+## 2026-05-11 Rollout Note
+
+The ops API mutation path remains unchanged:
+
+```text
+authenticated ops-api session
+-> _ops workflow_dispatch
+-> GitHub App installation token
+-> source/mirror policy
+-> target repository
+```
+
+No repository mutation was moved into the GitHub OAuth token. OAuth remains identity-only with `read:user` and `user:email`.
+
+The resumed rollout used `_ops` workflows for production environment audit, topology/ruleset audit, release gates, release orchestration, promote-back/sync evidence, and publish/deploy dispatch evidence.
 repo-source-mirror-release-gate.yml
 repo-mirror-sync.yml
 ```

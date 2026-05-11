@@ -79,6 +79,22 @@ final_state = ready
 
 `tree_equal` is valid for release gates because it proves the promoted source content and the mirror execution content are equivalent without requiring force-pushes or ruleset bypasses.
 
+## 2026-05-11 Expanded Batch
+
+The source/mirror model was expanded to:
+
+```text
+oaslananka/kicad-mcp-pro              -> oaslananka-lab/kicad-mcp-pro
+oaslananka/mcp-ssh-tool               -> oaslananka-lab/mcp-ssh-tool
+oaslananka/fovux                      -> oaslananka-lab/fovux
+oaslananka/a2a-mesh                   -> oaslananka-lab/a2a-mesh
+oaslananka/codex-app-server-web       -> oaslananka-lab/codex-app-server-web
+oaslananka/cifence                    -> oaslananka-lab/cifence
+oaslananka/oaslananka.github.io       -> oaslananka-lab/oaslananka.github.io
+```
+
+Topology audits succeeded for all seven mirrors. Open Dependabot PRs observed in `fovux`, `a2a-mesh`, and `oaslananka.github.io` are ordinary dependency PR inventory, not source/mirror rollout blockers.
+
 Default-branch force-push is still refused. If source and mirror diverge and are not tree-equal, sync reports the exact unsafe state instead of rewriting protected history.
 
 ## Rollout Verification Snapshot

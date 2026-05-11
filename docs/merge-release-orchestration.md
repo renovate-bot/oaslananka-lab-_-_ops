@@ -78,6 +78,30 @@ When a target release workflow contains both release artifact jobs and protected
 
 ## 2026-05-11 Rollout Observations
 
+The resumed closeout added stricter publish workflow routing:
+
+```text
+commit: 4b0066027ac32e06f3bedd5ff0ffa1866772ecbf
+change: ops-release-orchestrator.yml now skips non-dispatchable publish workflow candidates, records skipped_no_workflow_dispatch, recognizes mcp-registry.yml, and dispatches MCP registry workflows with publish=true and target=official.
+```
+
+This fixed the next-batch `publish_workflow_dispatch_failed` state where `kicad-mcp-pro` exposed a stale/non-dispatchable `release.yml` workflow through the Actions API. The final orchestrator evidence is:
+
+```text
+kicad-mcp-pro: https://github.com/oaslananka-lab/_ops/actions/runs/25685232435
+  publish workflow: .github/workflows/mcp-registry.yml
+  publish run: https://github.com/oaslananka-lab/kicad-mcp-pro/actions/runs/25685286341
+  final state: awaiting_environment_approval
+
+mcp-ssh-tool: https://github.com/oaslananka-lab/_ops/actions/runs/25685245036
+  release workflow: .github/workflows/release.yml
+  docker workflow: .github/workflows/docker.yml
+  docker run: https://github.com/oaslananka-lab/mcp-ssh-tool/actions/runs/25685436692
+  final state: release_publish_complete for the dispatchable Docker smoke path
+```
+
+The orchestrator still refuses to publish from PR heads. When no merge commit SHA is supplied it resolves the immutable `main` commit SHA before dispatching `publish-production.yml`.
+
 The full rollout exercised the release and publish paths after enabling product publish policy.
 
 Observed states:

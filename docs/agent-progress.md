@@ -446,3 +446,21 @@ Validation:
 Policy state:
   - `release.merge_release_pr=false`; release PR #18 remains open by policy.
   - `publish.enabled=false`; no production publish was performed.
+# 2026-05-11 Resume Rollout Closeout
+
+Current `_ops` resume commits:
+
+```text
+14bcfdc69fae1eb59bfc40153ca6191c8e290560 ops(agent): classify publish rollout failures
+24950600f3bea233bcfc5dce70292db8dafa7e27 ops(diagnostics): ignore optional external review quota status
+0562088e3b868ed526770a41c99f66410b527696 ops(policy): onboard next repository batch
+4b0066027ac32e06f3bedd5ff0ffa1866772ecbf ops(release): dispatch only supported publish workflows
+```
+
+The interrupted kicad-studio publish workflow PR is closed and merged. kicad-studio PRs #41-#46 are closed/merged, the code-owner review gate is no longer an active rollout blocker, and the final VS Code Marketplace/Open VSX publish run succeeded at:
+
+```text
+https://github.com/oaslananka-lab/kicad-studio/actions/runs/25682226343
+```
+
+Production environments now exist for current product mirrors and for the expanded batch publish-enabled mirrors. The remaining states are exact external registry or protected environment configuration items, recorded in `docs/full-rollout-status.md` and `docs/next-batch-rollout-status.md`.

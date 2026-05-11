@@ -34,6 +34,20 @@ oaslananka-lab/mcp-infra-lens      full, ci_cd_mirror, merge enabled, release en
 oaslananka/*                       source, canonical_source, CI delegated to oaslananka-lab, release/publish delegated
 ```
 
+2026-05-11 expanded policy coverage:
+
+```text
+oaslananka-lab/kicad-mcp-pro       full, ci_cd_mirror, release enabled, publish enabled for GHCR and MCP Registry
+oaslananka-lab/mcp-ssh-tool        full, ci_cd_mirror, release enabled, publish enabled for npm, GHCR, and MCP Registry
+oaslananka-lab/fovux               full, ci_cd_mirror, release enabled, no_publish_target_detected
+oaslananka-lab/a2a-mesh            full, ci_cd_mirror, release enabled, npm publish path detected
+oaslananka-lab/codex-app-server-web full, ci_cd_mirror, release enabled, no_publish_target_detected
+oaslananka-lab/cifence             full, ci_cd_mirror, release enabled, no separate package publish target detected
+oaslananka-lab/oaslananka.github.io full, ci_cd_mirror, release enabled, GitHub Pages/deploy target detected
+```
+
+The expanded batch policy landed in commit `0562088e3b868ed526770a41c99f66410b527696`. Source repo counterparts under `oaslananka/*` use the `source` profile and keep CI/CD delegated to `oaslananka-lab/*`.
+
 ## Source/Mirror Semantics
 
 `oaslananka/*` is canonical source-of-truth.

@@ -79,6 +79,26 @@ GitHub webhook or /ops command
 -> JSON artifact report
 ```
 
+## 2026-05-11 Rollout State
+
+Current rollout evidence is recorded in:
+
+```text
+docs/full-rollout-status.md
+docs/next-batch-rollout-status.md
+docs/control-plane-completion-report.md
+```
+
+The active source/mirror model remains:
+
+```text
+oaslananka/*        canonical source-of-truth
+oaslananka-lab/*    CI/CD mirror and release execution workspace
+oaslananka-lab/_ops control-plane
+```
+
+The resumed pass eliminated internal `publish_workflow_not_found`, `production_environment_missing`, and known `Classification: unknown` rollout states. Remaining publish blockers are external registry or protected environment configuration states with exact run URLs and missing secret names in the rollout docs.
+
 Policy lives under:
 
 ```text

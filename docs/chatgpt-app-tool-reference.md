@@ -80,6 +80,25 @@ run_release_orchestrator:
   ops-release-orchestrator.yml ran for all product mirrors and reported exact publish blockers.
 ```
 
+## Expanded Batch Tool Evidence
+
+The following tool mappings were exercised during the resumed rollout:
+
+```text
+run_topology_audit:
+  repo-topology-audit.yml succeeded for kicad-mcp-pro, mcp-ssh-tool, fovux, a2a-mesh, codex-app-server-web, cifence, and oaslananka.github.io.
+
+run_release_orchestrator:
+  ops-release-orchestrator.yml succeeded for the expanded batch.
+  kicad-mcp-pro now maps to .github/workflows/mcp-registry.yml and returns awaiting_environment_approval.
+  mcp-ssh-tool maps to release.yml plus docker.yml and returns release_publish_complete for the dispatchable Docker smoke path.
+
+explain_failure:
+  Classifier support now covers publish workflow discovery, production environment, npm trusted publishing/token, marketplace token, Open VSX token, MCP registry config/token, actionlint, workflow YAML, ruleset, and code-owner review failure classes.
+```
+
+The ChatGPT App should surface external blockers as typed tool results with exact secret names and run URLs, never with secret values.
+
 Current app-facing blocker states should be exposed as structured failure explanations:
 
 ```text
