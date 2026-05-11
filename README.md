@@ -126,6 +126,7 @@ docs/chatgpt-app-ops-console.md
 docs/chatgpt-app-tool-reference.md
 docs/cloudflare-deploy.md
 docs/source-mirror-topology.md
+docs/full-rollout-status.md
 ```
 
 ## Onboard a Repository

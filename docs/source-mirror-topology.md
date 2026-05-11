@@ -80,3 +80,20 @@ final_state = ready
 `tree_equal` is valid for release gates because it proves the promoted source content and the mirror execution content are equivalent without requiring force-pushes or ruleset bypasses.
 
 Default-branch force-push is still refused. If source and mirror diverge and are not tree-equal, sync reports the exact unsafe state instead of rewriting protected history.
+
+## Rollout Verification Snapshot
+
+Generated: 2026-05-11
+
+The latest full rollout verified that source/mirror release gates accept either exact SHA equality or `tree_equal` content equivalence:
+
+| Repo | Relation | Evidence |
+|---|---|---|
+| `boardguard` | `tree_equal` | `repo-topology-audit.yml` run `25648430322` |
+| `kicad-studio` | `equal` | `repo-topology-audit.yml` run `25648438697` |
+| `mcp-health-monitor` | `tree_equal` | `repo-topology-audit.yml` run `25648842281` |
+| `mcp-debug-recorder` | `tree_equal` | `repo-topology-audit.yml` run `25648460556` |
+| `mcp-infra-lens` | `tree_equal` | `repo-topology-audit.yml` run `25648472903` |
+| `test` | `equal` | `repo-topology-audit.yml` run `25648483593` |
+
+Open product blockers are not topology blockers. They are publish workflow/environment gaps or repository ruleset review gates, and are tracked in `docs/full-rollout-status.md`.

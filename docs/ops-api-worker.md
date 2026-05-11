@@ -153,3 +153,23 @@ https://chatgpt.com
 ```
 
 The ChatGPT origin may need refinement after final Apps SDK submission guidance is locked.
+
+## Rollout Use
+
+The API route and health endpoint were re-verified during the full rollout:
+
+```text
+GET https://ops-api.oaslananka.dev/health
+{"status":"ok","service":"oaslananka-ops-api","runtime":"cloudflare-workers"}
+```
+
+Repository mutation remains outside the OAuth token path:
+
+```text
+ops-api authenticated session
+-> _ops workflow_dispatch
+-> GitHub App installation token
+-> repository operation
+```
+
+The API can dispatch promote-back, topology audit, mirror sync, PR diagnostics, fix-loop, finalization, and release orchestration workflows. The `kicad-studio` PR finalization blockers observed in the rollout came from GitHub merge protection (`HTTP 405: Waiting on code owner review from oaslananka`), not from the ops-api or OAuth path.

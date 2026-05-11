@@ -25,12 +25,12 @@ breakglass  full plus explicit bypass/admin paths when configured
 ## Current Repository Policies
 
 ```text
-oaslananka-lab/kicad-studio        full, merge enabled, release enabled, publish disabled
-oaslananka-lab/boardguard          full, merge enabled, release enabled, publish disabled
+oaslananka-lab/kicad-studio        full, merge enabled, release enabled, publish enabled for VS Code Marketplace and Open VSX
+oaslananka-lab/boardguard          full, merge enabled, release enabled, publish enabled for npm
 oaslananka-lab/test                full, merge enabled, release disabled, publish disabled
-oaslananka-lab/mcp-health-monitor  guarded, merge disabled, release enabled, publish disabled
-oaslananka-lab/mcp-debug-recorder  guarded, merge disabled, release enabled, publish disabled
-oaslananka-lab/mcp-infra-lens      guarded, ci_cd_mirror, merge disabled, release enabled, publish disabled
+oaslananka-lab/mcp-health-monitor  full, merge enabled, release enabled, publish enabled for npm and MCP Registry
+oaslananka-lab/mcp-debug-recorder  full, merge enabled, release enabled, publish enabled for npm and MCP Registry
+oaslananka-lab/mcp-infra-lens      full, ci_cd_mirror, merge enabled, release enabled, publish enabled for npm and MCP Registry
 oaslananka/*                       source, canonical_source, CI delegated to oaslananka-lab, release/publish delegated
 ```
 
@@ -82,3 +82,29 @@ source/mirror release gate
 ```
 
 Publish is disabled unless `publish.enabled=true`. When enabled, publish still must run from `main` or a tag through the configured protected environment.
+
+## Rollout Result
+
+Generated: 2026-05-11
+
+Full lifecycle policy is now enabled for all real product mirrors. The current blockers are not policy-disabled states:
+
+```text
+kicad-studio:
+  code-owner review requirement blocks automated merge of clean Dependabot PRs.
+  production environment is missing for marketplace publish.
+
+boardguard:
+  publish workflow is not present/discoverable.
+
+mcp-health-monitor:
+  npm publish reached the registry and failed with E404 while NODE_AUTH_TOKEN was empty.
+
+mcp-debug-recorder:
+  publish workflow is not present/discoverable.
+
+mcp-infra-lens:
+  publish workflow is not present/discoverable.
+```
+
+See `docs/full-rollout-status.md` for run URLs and per-repo evidence.

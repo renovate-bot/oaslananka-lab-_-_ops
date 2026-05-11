@@ -57,3 +57,35 @@ update_existing_pr
 ```
 
 `merge_source_pr` is explicit. The API never merges a canonical source PR unless the request supplies `true` or `"true"` and policy permits the merge. Invalid modes return `INVALID_PROMOTE_MODE` and do not dispatch `_ops`.
+
+## Rollout Validation Notes
+
+The tool mapping was exercised indirectly through the deployed ops API and `_ops` workflows:
+
+```text
+run_topology_audit:
+  repo-topology-audit.yml succeeded for all six target mirrors.
+
+promote_back_to_source:
+  repo-promote-back.yml opened and merged canonical source PRs for boardguard, mcp-health-monitor, mcp-debug-recorder, and mcp-infra-lens.
+
+sync_source_to_mirror:
+  repo-mirror-sync.yml returned tree_equal for promoted repositories.
+
+finalize_pr:
+  ops-pr-finalize.yml merged mcp-health-monitor release PR #1.
+  ops-pr-finalize.yml refused kicad-studio PRs #41-#45 because GitHub requires code-owner review.
+
+run_release_orchestrator:
+  ops-release-orchestrator.yml ran for all product mirrors and reported exact publish blockers.
+```
+
+Current app-facing blocker states should be exposed as structured failure explanations:
+
+```text
+ruleset_code_owner_review_required
+production_environment_missing
+publish_workflow_not_found
+npm_publish_e404
+notebooklm_local_profile_access_denied
+```

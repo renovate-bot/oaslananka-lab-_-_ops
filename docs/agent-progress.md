@@ -217,6 +217,33 @@ Next: Merge boardguard PR #17 manually or explicitly authorize merge; after main
 
 ## 2026-05-10 - Group B MCP pilot onboarding completed
 
+## 2026-05-11 - Full source/mirror rollout status
+
+Completed policy rollout and source/mirror validation for the current target set.
+
+Applied:
+  - Rolled full lifecycle policy to `kicad-studio`, `mcp-health-monitor`, `mcp-debug-recorder`, and `mcp-infra-lens`.
+  - Preserved `test` as full lifecycle smoke with publish disabled by policy.
+  - Preserved `boardguard` release and publish policy settings from commit `522e717f14b432fd84309d500f20f5f65770b7da`.
+  - Validated lab and source policies with `scripts/ops-policy.mjs`.
+  - Ran topology and ruleset audits for all six target repositories.
+  - Promoted mirror changes back to canonical source and re-synced mirrors for `boardguard`, `mcp-health-monitor`, `mcp-debug-recorder`, and `mcp-infra-lens`.
+  - Merged `mcp-health-monitor` release PR #1, promoted that release merge back to source PR #5, and re-synced the mirror.
+  - Patched five `kicad-studio` Dependabot mirror PRs by formatting `pnpm-lock.yaml`; all patched PR heads have green GitHub checks.
+  - Attempted policy finalization of the five `kicad-studio` PRs through `ops-pr-finalize.yml`.
+  - Ran release gates and release orchestrators for all product repositories.
+
+Blocked:
+  - `kicad-studio` PRs #41-#45 remain open because GitHub returned `HTTP 405: Waiting on code owner review from oaslananka` during expected-head-SHA merge attempts.
+  - `kicad-studio` ruleset audit also reports the `production` publish environment is missing.
+  - `mcp-health-monitor` release workflow reached `Publish to npm` and failed with npm `E404` for `mcp-health-monitor@1.0.4`; `NODE_AUTH_TOKEN` was empty in the publish step.
+  - `boardguard`, `kicad-studio`, `mcp-debug-recorder`, and `mcp-infra-lens` release orchestrators reported `publish_workflow_not_found`.
+  - NotebookLM import could not run because `C:\Users\Admin\.notebooklm-mcp-cli\profiles` is inaccessible to the current process.
+
+Evidence:
+  - Policy rollout commit: `e53ae5a2e673f126f900d5ea74a3ea3db84ac7c8`.
+  - Full per-repo evidence is recorded in `docs/full-rollout-status.md`.
+
 Completed: 2026-05-10T10:00:00+03:00
 
 Applied:

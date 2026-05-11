@@ -112,3 +112,43 @@ Prepared integration points:
 `REPO_OPS_APP_PRIVATE_KEY` must be present as a Cloudflare Worker secret before authenticated workflow dispatch endpoints can mutate repositories.
 
 Full browser OAuth callback validation requires an interactive GitHub login session. Non-interactive validation currently confirms the authorize redirect and requested scopes.
+
+## 2026-05-11 Rollout Notes
+
+The ops API remained healthy during the repository rollout:
+
+```text
+GET https://ops-api.oaslananka.dev/health
+status: ok
+service: oaslananka-ops-api
+runtime: cloudflare-workers
+```
+
+The deployed control path used for repository mutation is still:
+
+```text
+ops-api session
+-> _ops workflow_dispatch
+-> GitHub App installation token
+-> repository policy
+-> target repository
+```
+
+The OAuth token is not used for repository mutation.
+
+The tool layer should surface these current exact rollout blockers:
+
+```text
+ruleset_code_owner_review_required
+production_environment_missing
+publish_workflow_not_found
+npm_publish_e404
+notebooklm_local_profile_access_denied
+```
+
+NotebookLM export/import is currently blocked by local profile access:
+
+```text
+path:  C:\Users\Admin\.notebooklm-mcp-cli\profiles
+error: [WinError 5] Erişim engellendi
+```

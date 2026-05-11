@@ -75,3 +75,36 @@ release_complete
 `publish_disabled` is a clean final state when repository policy disables publish.
 
 When a target release workflow contains both release artifact jobs and protected publish jobs, `_ops` treats the protected environment gate as a publish boundary. If `publish.enabled=false`, the orchestrator records the release workflow observation and reports `publish_disabled` instead of waiting for or approving the protected publish job.
+
+## 2026-05-11 Rollout Observations
+
+The full rollout exercised the release and publish paths after enabling product publish policy.
+
+Observed states:
+
+```text
+boardguard:
+  release orchestrator run 25648564700
+  final_state publish_workflow_not_found
+
+kicad-studio:
+  release orchestrator run 25648590951
+  final_state publish_workflow_not_found
+  ruleset audit also reported production environment missing
+
+mcp-health-monitor:
+  release orchestrator run 25648861038
+  final_state release_workflow_failed
+  release workflow run 25648732393 failed in release-assets / Publish to npm
+  npm returned E404 for mcp-health-monitor@1.0.4 while NODE_AUTH_TOKEN was empty
+
+mcp-debug-recorder:
+  release orchestrator run 25648655235
+  final_state publish_workflow_not_found
+
+mcp-infra-lens:
+  release orchestrator run 25648679014
+  final_state publish_workflow_not_found
+```
+
+`publish_workflow_not_found` is a blocker for this rollout because publish policy is enabled for the product repositories. It is not reported as `publish_disabled`.

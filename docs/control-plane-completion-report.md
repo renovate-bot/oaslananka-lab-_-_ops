@@ -219,6 +219,63 @@ Ruleset/review-model:
 - Branch-Protection
 ```
 
+---
+
+## 2026-05-11 Update — Source/mirror rollout across product repositories
+
+The control-plane policy rollout commit is:
+
+```text
+e53ae5a2e673f126f900d5ea74a3ea3db84ac7c8
+```
+
+Current topology model remains:
+
+```text
+oaslananka/*        canonical source-of-truth
+oaslananka-lab/*    CI/CD mirror and release execution workspace
+oaslananka-lab/_ops control-plane
+```
+
+Completed:
+
+- Full lifecycle policy is enabled for `boardguard`, `kicad-studio`, `mcp-health-monitor`, `mcp-debug-recorder`, and `mcp-infra-lens`.
+- `test` remains a safe smoke repository with publish disabled by policy.
+- Source/mirror topology audits are ready or tree-equivalent for all six target mirrors.
+- Promote-back and mirror resync completed for `boardguard`, `mcp-health-monitor`, `mcp-debug-recorder`, and `mcp-infra-lens`.
+- `mcp-health-monitor` release PR #1 merged in the mirror, then promoted back through canonical source PR #5 and resynced to the mirror.
+- Five `kicad-studio` Dependabot mirror PRs were patched with lockfile formatting and now have clean GitHub checks.
+
+Key run evidence is recorded in:
+
+```text
+docs/full-rollout-status.md
+```
+
+Remaining exact blockers:
+
+```text
+kicad-studio:
+  - code-owner review is required before merge; merge API returned HTTP 405.
+  - production environment is missing for publish.
+
+boardguard:
+  - publish_workflow_not_found.
+
+mcp-health-monitor:
+  - release workflow publish step failed with npm E404 for mcp-health-monitor@1.0.4.
+  - NODE_AUTH_TOKEN was empty in the publish step.
+
+mcp-debug-recorder:
+  - publish_workflow_not_found.
+
+mcp-infra-lens:
+  - publish_workflow_not_found.
+
+NotebookLM:
+  - local NotebookLM profile directory is inaccessible: C:\Users\Admin\.notebooklm-mcp-cli\profiles.
+```
+
 Next engineering task:
 
 ```text
