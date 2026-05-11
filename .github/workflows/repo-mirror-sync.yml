@@ -204,7 +204,7 @@ jobs:
           open_sync_pr() {
             local branch="repo-ops/sync-${SOURCE_REPO}-${source_sha:0:12}"
             local branch_ref="refs/heads/${branch}"
-            local title="sync: mirror ${SOURCE_FULL}@${source_sha:0:12}"
+            local title="chore(sync): mirror ${SOURCE_REPO} from source ${source_sha:0:12}"
             local body
             body="$(printf 'Source/mirror policy detected drift from %s to %s.\n\nThis PR was opened by the control-plane because the mirror default branch is protected and direct sync is not allowed.\n\nSource commit: %s\nTarget before: %s\n' \
               "${SOURCE_FULL}" \
