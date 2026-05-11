@@ -36,13 +36,13 @@ release:
   enabled: true
   trigger_after_merge: true
   release_please: true
-  merge_release_pr: false
-  create_github_release: false
+  merge_release_pr: true
+  create_github_release: true
   require_release_plan_clean: true
 
 publish:
-  enabled: false
-  npm: false
+  enabled: true
+  npm: true
   require_environment: production
   trusted_publishing_only: true
 
