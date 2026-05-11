@@ -156,15 +156,20 @@ jobs:
             --slurpfile runs "${OUT}/runs-current-head.json" \
             --slurpfile all_runs "${OUT}/runs.json" \
             --slurpfile threads "${OUT}/unresolved-review-threads.json" \
-            '{
+            '
+            def ignored_optional_external_check:
+              (.name == "CodeRabbit" and .bucket == "fail" and ((.link // "") == ""));
+            {
               pr: $pr[0],
               check_summary: {
                 total: ($checks[0] | length),
-                failing: ($checks[0] | map(select(.bucket == "fail")) | length),
+                failing: ($checks[0] | map(select(.bucket == "fail" and (ignored_optional_external_check | not))) | length),
                 pending: ($checks[0] | map(select(.bucket == "pending")) | length),
                 successful: ($checks[0] | map(select(.bucket == "pass")) | length),
-                skipped: ($checks[0] | map(select(.bucket == "skipping")) | length)
+                skipped: ($checks[0] | map(select(.bucket == "skipping")) | length),
+                ignored_optional_external: ($checks[0] | map(select(ignored_optional_external_check)) | length)
               },
+              ignored_optional_external_checks: ($checks[0] | map(select(ignored_optional_external_check))),
               run_summary: {
                 scope: "current_pr_head_sha",
                 total: ($runs[0] | length),
@@ -207,6 +212,7 @@ jobs:
           PENDING_CHECKS="$(jq -r '.check_summary.pending' "${OUT}/diagnostics.json")"
           FAILED_RUNS="$(jq -r '.run_summary.failures' "${OUT}/diagnostics.json")"
           UNRESOLVED_THREADS="$(jq -r '.unresolved_review_threads | length' "${OUT}/diagnostics.json")"
+          IGNORED_EXTERNAL="$(jq -r '.check_summary.ignored_optional_external // 0' "${OUT}/diagnostics.json")"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Diagnostic summary" >> "$GITHUB_STEP_SUMMARY"
@@ -215,12 +221,17 @@ jobs:
           echo "|---|---:|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Failing checks | ${FAILING_CHECKS} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Pending checks | ${PENDING_CHECKS} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ignored optional external checks | ${IGNORED_EXTERNAL} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Failed workflow runs | ${FAILED_RUNS} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Unresolved review threads | ${UNRESOLVED_THREADS} |" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Failed runs" >> "$GITHUB_STEP_SUMMARY"
           jq -r '.[] | select(.conclusion == "failure") | "- `" + (.databaseId|tostring) + "` " + .workflowName + " / " + .name + " — " + .url' "${OUT}/runs-current-head.json" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "#### Ignored optional external checks" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.ignored_optional_external_checks[]? | "- `" + .name + "` " + (.state // .bucket // "unknown") + " — optional external review status without target URL; repository-owned checks and review threads remain authoritative."' "${OUT}/diagnostics.json" >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Unresolved review threads" >> "$GITHUB_STEP_SUMMARY"
