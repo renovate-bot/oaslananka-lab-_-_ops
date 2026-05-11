@@ -212,8 +212,30 @@ jobs:
               "${source_sha}" \
               "${target_sha_before:-none}")"
 
-            git push target "refs/remotes/origin/${default_branch}:${branch_ref}" --force-with-lease || \
-              git push target "refs/remotes/origin/${default_branch}:${branch_ref}" --force
+            if [[ -n "${target_sha_before}" ]]; then
+              git checkout -B "${branch}" "refs/remotes/target/${default_branch}"
+            else
+              git checkout -B "${branch}" "${source_sha}"
+            fi
+
+            git read-tree --reset -u "${source_sha}"
+
+            if git diff --cached --quiet; then
+              status="up_to_date_tree_equal"
+              relation="tree_equal"
+              commits_synced="0"
+              record "default_branch" "up_to_date_tree_equal" "${TARGET_FULL}/${default_branch} tree already matches ${SOURCE_FULL}@${source_sha}"
+              return 0
+            fi
+
+            git commit \
+              -m "${title}" \
+              -m "Source-of-truth: ${SOURCE_FULL}@${source_sha}" \
+              -m "Execution mirror: ${TARGET_FULL}" \
+              -m "Created by oaslananka-repo-ops because the mirror default branch is protected."
+
+            git push target "HEAD:${branch_ref}" --force-with-lease || \
+              git push target "HEAD:${branch_ref}" --force
 
             existing_pr="$(target_api --method GET "repos/${TARGET_FULL}/pulls" \
               -f state=open \
