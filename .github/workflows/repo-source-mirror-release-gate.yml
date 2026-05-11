@@ -1,0 +1,266 @@
+name: Repo Source Mirror Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+      release_ref:
+        required: false
+        default: main
+        type: string
+      requested_action:
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - publish
+          - release_and_publish
+      dispatch_orchestrator:
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: repo-source-mirror-release-gate-${{ inputs.target_owner }}-${{ inputs.target_repo }}-${{ inputs.release_ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Create target GitHub App token
+        id: target_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+
+      - name: Evaluate source mirror release gate
+        env:
+          TARGET_TOKEN: ${{ steps.target_app.outputs.token }}
+          OPS_TOKEN: ${{ github.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          REQUESTED_ACTION: ${{ inputs.requested_action }}
+          DISPATCH_ORCHESTRATOR: ${{ inputs.dispatch_orchestrator }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="${GITHUB_WORKSPACE}/out"
+          RAW="${OUT}/raw"
+          WORK="${RUNNER_TEMP}/source-mirror-release-gate"
+          mkdir -p "${RAW}" "${WORK}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/source-mirror-release-gate-${TARGET_OWNER}-${TARGET_REPO}.json"
+          : > "${STEPS}"
+
+          final_state="policy_invalid"
+          source_full=""
+          mirror_full=""
+          source_sha=""
+          mirror_sha=""
+          relation="unknown"
+          dispatch_run_id=""
+
+          target_api() {
+            GH_TOKEN="${TARGET_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_api() {
+            GH_TOKEN="${OPS_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          finish() {
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg target "${TARGET_OWNER}/${TARGET_REPO}" \
+              --arg release_ref "${RELEASE_REF}" \
+              --arg requested_action "${REQUESTED_ACTION}" \
+              --arg source "${source_full}" \
+              --arg mirror "${mirror_full}" \
+              --arg source_sha "${source_sha}" \
+              --arg mirror_sha "${mirror_sha}" \
+              --arg relation "${relation}" \
+              --arg dispatch_run_id "${dispatch_run_id}" \
+              --arg final_state "${final_state}" \
+              --slurpfile policy "${OUT}/policy.json" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{
+                generated_at: $generated_at,
+                target: $target,
+                release_ref: $release_ref,
+                requested_action: $requested_action,
+                source: (if $source == "" then null else $source end),
+                mirror: (if $mirror == "" then null else $mirror end),
+                source_sha: (if $source_sha == "" then null else $source_sha end),
+                mirror_sha: (if $mirror_sha == "" then null else $mirror_sha end),
+                relation: $relation,
+                release_requires_sha_match: ($policy[0].mirror.require_source_mirror_sha_match_before_release // true),
+                publish_requires_sha_match: ($policy[0].mirror.require_source_mirror_sha_match_before_publish // true),
+                publish_enabled: ($policy[0].publish.enabled // false),
+                dispatch_run_id: (if $dispatch_run_id == "" then null else ($dispatch_run_id|tonumber) end),
+                final_state: $final_state,
+                steps: $steps[0]
+              }' > "${REPORT}"
+          }
+          trap finish EXIT
+
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
+          node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
+          role="$(jq -r '.repository_role.role' "${OUT}/policy.json")"
+          record "policy" "loaded" "role=${role}"
+
+          publish_requested=false
+          release_requested=false
+          if [[ "${REQUESTED_ACTION}" == "publish" || "${REQUESTED_ACTION}" == "release_and_publish" ]]; then
+            publish_requested=true
+          fi
+          if [[ "${REQUESTED_ACTION}" == "release" || "${REQUESTED_ACTION}" == "release_and_publish" ]]; then
+            release_requested=true
+          fi
+
+          if [[ "${publish_requested}" == "true" && "$(jq -r '.publish.enabled' "${OUT}/policy.json")" != "true" ]]; then
+            final_state="publish_disabled"
+            record "publish" "disabled" "policy publish.enabled=false"
+            exit 0
+          fi
+
+          if [[ "${role}" == "ci_cd_mirror" ]]; then
+            source_full="$(jq -r '.mirror.source_owner + "/" + .mirror.source_repo' "${OUT}/policy.json")"
+            mirror_full="$(jq -r '.mirror.mirror_owner + "/" + .mirror.mirror_repo' "${OUT}/policy.json")"
+            source_branch="$(jq -r '.mirror.source_branch' "${OUT}/policy.json")"
+            mirror_branch="$(jq -r '.mirror.mirror_branch' "${OUT}/policy.json")"
+          elif [[ "${role}" == "canonical_source" ]]; then
+            source_full="${TARGET_OWNER}/${TARGET_REPO}"
+            mirror_full="$(jq -r '.source.ci_delegated_to' "${OUT}/policy.json")/${TARGET_REPO}"
+            source_branch="${RELEASE_REF}"
+            mirror_branch="main"
+          else
+            final_state="ready"
+            record "topology" "not_mirrored" "role=${role}"
+          fi
+
+          if [[ -n "${source_full}" && -n "${mirror_full}" ]]; then
+            source_url="https://github.com/${source_full}.git"
+            mirror_url="https://github.com/${mirror_full}.git"
+            git init -q "${WORK}/repo"
+            git -C "${WORK}/repo" remote add source "${source_url}"
+            git -C "${WORK}/repo" remote add mirror "${mirror_url}"
+            git -C "${WORK}/repo" fetch --depth=100 source "${source_branch}:refs/remotes/source/check" >/dev/null 2>&1 || true
+            git -C "${WORK}/repo" fetch --depth=100 mirror "${mirror_branch}:refs/remotes/mirror/check" >/dev/null 2>&1 || true
+            source_sha="$(git -C "${WORK}/repo" rev-parse refs/remotes/source/check 2>/dev/null || true)"
+            mirror_sha="$(git -C "${WORK}/repo" rev-parse refs/remotes/mirror/check 2>/dev/null || true)"
+            if [[ -z "${source_sha}" || -z "${mirror_sha}" ]]; then
+              final_state="validation_missing"
+              record "git" "missing_ref" "source_sha=${source_sha:-missing} mirror_sha=${mirror_sha:-missing}"
+              exit 0
+            fi
+            if [[ "${source_sha}" == "${mirror_sha}" ]]; then
+              relation="equal"
+            elif git -C "${WORK}/repo" merge-base --is-ancestor "${source_sha}" "${mirror_sha}" 2>/dev/null; then
+              relation="mirror_contains_source"
+            elif git -C "${WORK}/repo" merge-base --is-ancestor "${mirror_sha}" "${source_sha}" 2>/dev/null; then
+              relation="mirror_behind_source"
+            else
+              relation="diverged"
+            fi
+            record "sha_relation" "${relation}" "source=${source_sha} mirror=${mirror_sha}"
+
+            require_match=false
+            if [[ "${release_requested}" == "true" && "$(jq -r '.mirror.require_source_mirror_sha_match_before_release' "${OUT}/policy.json")" == "true" ]]; then
+              require_match=true
+            fi
+            if [[ "${publish_requested}" == "true" && "$(jq -r '.mirror.require_source_mirror_sha_match_before_publish' "${OUT}/policy.json")" == "true" ]]; then
+              require_match=true
+            fi
+            if [[ "${require_match}" == "true" && "${relation}" != "equal" && "${relation}" != "mirror_contains_source" ]]; then
+              if [[ "$(jq -r '.mirror.promote_back' "${OUT}/policy.json")" == "true" ]]; then
+                final_state="promote_back_required"
+              else
+                final_state="source_mirror_mismatch"
+              fi
+              exit 0
+            fi
+          fi
+
+          final_state="ready"
+          if [[ "${DISPATCH_ORCHESTRATOR}" == "true" && "${release_requested}" == "true" ]]; then
+            body="${OUT}/orchestrator-dispatch.json"
+            jq -n \
+              --arg target_owner "${TARGET_OWNER}" \
+              --arg target_repo "${TARGET_REPO}" \
+              --arg requested_action "${REQUESTED_ACTION}" \
+              '{
+                ref: "main",
+                inputs: {
+                  target_owner: $target_owner,
+                  target_repo: $target_repo,
+                  requested_action: $requested_action,
+                  dry_run: "false",
+                  source_mirror_gate: "passed"
+                }
+              }' > "${body}"
+            if ops_api --method POST "repos/${OPS_REPO}/actions/workflows/ops-release-orchestrator.yml/dispatches" --input "${body}" > "${RAW}/orchestrator-dispatch.json"; then
+              dispatch_run_id="$(jq -r '.workflow_run_id // .id // empty' "${RAW}/orchestrator-dispatch.json")"
+              final_state="release_dispatched"
+              record "release_orchestrator" "dispatched" "${dispatch_run_id:-accepted}"
+            fi
+          fi
+
+          {
+            echo "### Repo Source Mirror Release Gate"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${TARGET_OWNER}/${TARGET_REPO} |"
+            echo "| Source | ${source_full:-none} |"
+            echo "| Mirror | ${mirror_full:-none} |"
+            echo "| Relation | ${relation} |"
+            echo "| Final state | ${final_state} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload source mirror release gate report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: source-mirror-release-gate-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14

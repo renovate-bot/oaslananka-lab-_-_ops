@@ -16,27 +16,33 @@ Release tags are cut in personal repositories. Original commits live there.
 
 ## Organization repositories
 
-`oaslananka-lab` is the CI/CD plane.
+`oaslananka-lab` is the CI/CD mirror and execution workspace.
 
 Organization repositories carry downstream mirrors of personal repositories.
 
 GitHub Actions are enabled in organization repositories.
 
-Organization repositories produce release artifacts.
+Organization repositories run validation and release orchestration, but canonical lifecycle closeout still belongs to the personal source repository unless policy explicitly permits mirror-only closeout.
 
 Agents must never push code changes directly to organization mirrors. Code changes must originate from the personal source repository.
 
 Agents may apply workflow, policy, diagnostics, and release automation changes from the `_ops` control-plane.
 
-## Sync direction
+## Sync and promote-back direction
 
-The sync direction is one way:
+The normal sync direction is one way:
 
 ```text
 oaslananka -> oaslananka-lab
 ```
 
-The organization mirror must never be synced back to the personal source repository.
+Validated mirror changes may be promoted back through a canonical source pull request:
+
+```text
+oaslananka-lab/<repo> -> oaslananka/<repo> via repo-promote-back.yml
+```
+
+This promote-back path is policy-gated. It must not force-push canonical source branches.
 
 ## Release flow
 
@@ -46,10 +52,35 @@ The release flow is:
 tag in personal repository
 -> mirror sync to organization repository
 -> organization CI runs
+-> source/mirror release gate verifies topology
 -> release artifact is published from organization CI/CD
 ```
 
 Release artifacts are produced by the organization CI/CD plane, not by personal repository workflows.
+
+Publish remains disabled unless repository policy explicitly enables it and protected environment rules are satisfied.
+
+## Ops API flow
+
+The future ChatGPT App and ops console use Cloudflare Workers:
+
+```text
+ChatGPT App / natural-language ops console
+-> https://ops-api.oaslananka.dev
+-> GitHub OAuth identity check
+-> _ops workflow_dispatch
+-> GitHub App installation token
+-> source/mirror policy
+-> GitHub repositories
+```
+
+GitHub OAuth is identity-only and limited to:
+
+```text
+read:user user:email
+```
+
+The OAuth token is not used for repository mutation.
 
 ## Webhook flow
 

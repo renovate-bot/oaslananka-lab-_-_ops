@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Repository Autonomy Policy",
   "type": "object",
-  "required": ["version", "autonomy", "agent", "pr", "release", "publish", "rulesets", "ops", "safety"],
+  "required": ["version", "autonomy", "repository_role", "agent", "pr", "release", "publish", "mirror", "source", "rulesets", "ops", "safety"],
   "properties": {
     "version": { "type": "integer", "const": 1 },
     "extends": { "type": "string" },
@@ -11,7 +11,17 @@
       "required": ["enabled", "profile"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "profile": { "type": "string", "enum": ["off", "suggest", "patch", "guarded", "full", "breakglass"] }
+        "profile": { "type": "string", "enum": ["off", "suggest", "source", "patch", "guarded", "full", "breakglass"] }
+      },
+      "additionalProperties": true
+    },
+    "repository_role": {
+      "type": "object",
+      "required": ["role", "source_of_truth_owner", "execution_owner"],
+      "properties": {
+        "role": { "type": "string", "enum": ["unknown", "canonical_source", "ci_cd_mirror", "control_plane", "org_native"] },
+        "source_of_truth_owner": { "type": "string" },
+        "execution_owner": { "type": "string" }
       },
       "additionalProperties": true
     },
@@ -73,6 +83,36 @@
         "require_environment": { "type": "string" },
         "require_tag_pattern": { "type": "string" },
         "trusted_publishing_only": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "mirror": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "source_owner": { "type": "string" },
+        "source_repo": { "type": "string" },
+        "source_branch": { "type": "string" },
+        "mirror_owner": { "type": "string" },
+        "mirror_repo": { "type": "string" },
+        "mirror_branch": { "type": "string" },
+        "direction": { "type": "string", "enum": ["source_to_mirror"] },
+        "promote_back": { "type": "boolean" },
+        "promote_method": { "type": "string", "enum": ["pull_request"] },
+        "delete_promote_branch": { "type": "boolean" },
+        "require_source_mirror_sha_match_before_release": { "type": "boolean" },
+        "require_source_mirror_sha_match_before_publish": { "type": "boolean" },
+        "allow_mirror_only_closeout": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "accepts_promoted_prs": { "type": "boolean" },
+        "ci_delegated_to": { "type": "string" },
+        "actions_expected_enabled": { "type": "boolean" },
+        "require_clean_mirror_validation": { "type": "boolean" }
       },
       "additionalProperties": true
     }

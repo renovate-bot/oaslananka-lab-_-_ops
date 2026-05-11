@@ -15,6 +15,7 @@ The default policy is safe: diagnostics, patching, and finalization are allowed,
 ```text
 off         diagnostics only
 suggest     comments and suggestions only
+source      canonical personal source; CI delegated to mirror; no direct Actions expected
 patch       patch the same PR branch, no merge
 guarded     patch, validate, finalize; merge disabled unless policy enables it
 full        patch, validate, finalize, merge, and release orchestration
@@ -29,8 +30,25 @@ oaslananka-lab/boardguard          full, merge enabled, release enabled, publish
 oaslananka-lab/test                full, merge enabled, release disabled, publish disabled
 oaslananka-lab/mcp-health-monitor  guarded, merge disabled, release enabled, publish disabled
 oaslananka-lab/mcp-debug-recorder  guarded, merge disabled, release enabled, publish disabled
-oaslananka-lab/mcp-infra-lens      guarded, merge disabled, release enabled, publish disabled
-oaslananka/*                       suggest, no patch, no merge, no release, no publish
+oaslananka-lab/mcp-infra-lens      guarded, ci_cd_mirror, merge disabled, release enabled, publish disabled
+oaslananka/*                       source, canonical_source, CI delegated to oaslananka-lab, release/publish delegated
+```
+
+## Source/Mirror Semantics
+
+`oaslananka/*` is canonical source-of-truth.
+
+`oaslananka-lab/*` is a CI/CD mirror and execution workspace.
+
+Mirror merges are not canonical closeout unless promote-back completes or policy explicitly enables mirror-only closeout.
+
+Use:
+
+```powershell
+node scripts/ops-policy.mjs topology --owner oaslananka-lab --repo boardguard
+node scripts/ops-policy.mjs topology --owner oaslananka --repo boardguard
+node scripts/ops-policy.mjs is-mirror --owner oaslananka-lab --repo boardguard
+node scripts/ops-policy.mjs source-target --owner oaslananka-lab --repo boardguard
 ```
 
 ## Resolver
@@ -60,6 +78,7 @@ review policy
 merge method policy
 release policy
 publish policy
+source/mirror release gate
 ```
 
 Publish is disabled unless `publish.enabled=true`. When enabled, publish still must run from `main` or a tag through the configured protected environment.

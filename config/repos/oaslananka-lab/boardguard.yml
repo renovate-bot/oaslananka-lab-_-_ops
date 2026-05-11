@@ -1,6 +1,11 @@
 version: 1
 extends: ../../repo-autonomy.default.yml
 
+repository_role:
+  role: ci_cd_mirror
+  source_of_truth_owner: oaslananka
+  execution_owner: oaslananka-lab
+
 autonomy:
   enabled: true
   profile: full
@@ -40,3 +45,19 @@ publish:
   npm: false
   require_environment: production
   trusted_publishing_only: true
+
+mirror:
+  enabled: true
+  source_owner: oaslananka
+  source_repo: boardguard
+  source_branch: main
+  mirror_owner: oaslananka-lab
+  mirror_repo: boardguard
+  mirror_branch: main
+  direction: source_to_mirror
+  promote_back: true
+  promote_method: pull_request
+  delete_promote_branch: true
+  require_source_mirror_sha_match_before_release: true
+  require_source_mirror_sha_match_before_publish: true
+  allow_mirror_only_closeout: false

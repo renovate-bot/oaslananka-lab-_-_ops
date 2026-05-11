@@ -137,7 +137,17 @@ jobs:
                 --arg sync_status "failed" \
                 --argjson commits_synced 0 \
                 --slurpfile steps "${STEPS}" \
-                '{generated_at:$generated_at,source:$source,target:$target,sync_status:$sync_status,commits_synced:$commits_synced,steps:$steps[0]}' \
+                '{
+                  generated_at:$generated_at,
+                  source_of_truth:$source,
+                  execution_mirror:$target,
+                  direction:"source_to_mirror",
+                  source:$source,
+                  target:$target,
+                  sync_status:$sync_status,
+                  commits_synced:$commits_synced,
+                  steps:$steps[0]
+                }' \
                 > "${REPORT}"
             fi
             exit "${exit_code}"
@@ -231,6 +241,9 @@ jobs:
             --slurpfile steps "${OUT}/steps.json" \
             '{
               generated_at: $generated_at,
+              source_of_truth: $source,
+              execution_mirror: $target,
+              direction: "source_to_mirror",
               source: $source,
               target: $target,
               default_branch: $default_branch,

@@ -1,0 +1,57 @@
+name: Deploy Ops API Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/ops_api_worker/**"
+      - ".github/workflows/deploy-ops-api-worker.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ops-api-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/ops_api_worker
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: services/ops_api_worker/pnpm-lock.yaml
+
+      - name: Install
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: corepack pnpm run typecheck
+
+      - name: Test
+        run: corepack pnpm test
+
+      - name: Lint
+        run: corepack pnpm run lint
+
+      - name: Deploy Worker
+        run: corepack pnpm exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

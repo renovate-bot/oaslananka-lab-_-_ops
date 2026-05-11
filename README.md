@@ -3,9 +3,11 @@ Repository operations control plane for CI/CD, automation, release orchestration
 
 ## Architecture Overview
 
-`oaslananka` personal repositories are the source of truth for code. GitHub Actions stay disabled there. Release tags are created there, and original commits live there.
+`oaslananka` personal repositories are the source of truth for code. GitHub Actions stay disabled there, and original commits live there.
 
-`oaslananka-lab` organization repositories are the CI/CD and release plane. They carry downstream mirrors of the personal repositories, run Actions, and publish artifacts.
+`oaslananka-lab` organization repositories are the CI/CD mirror and execution workspace. They carry downstream mirrors of the personal repositories and run Actions.
+
+Validated mirror changes are not canonical until promoted back to `oaslananka/*`, unless a repository policy explicitly says mirror-only closeout is allowed.
 
 Synchronization is one way:
 
@@ -35,6 +37,9 @@ docs/agent-operating-contract.md
 | `repo-onboarding.yml` | Audits a repo during onboarding and writes the correct `AGENTS.md` template for the selected repo role. |
 | `repo-code-scanning-triage.yml` | Classifies open code scanning alerts into actionable, ruleset/review, process-policy, or manual-review buckets. |
 | `repo-mirror-sync.yml` | Syncs a personal source repo to its organization mirror and emits a mirror-sync JSON artifact. |
+| `repo-topology-audit.yml` | Audits source/mirror existence, Actions state, App access, and SHA relationship. |
+| `repo-promote-back.yml` | Opens or updates a canonical source PR from validated mirror changes. |
+| `repo-source-mirror-release-gate.yml` | Blocks release/publish when source/mirror state requires promote-back or validation. |
 | `inbox-handler.yml` | Handles webhook-routed issue/comment events, acknowledges issues, classifies them, labels ops/security issues, and dispatches `/ops` commands. |
 | `agent-fix-loop.yml` | Runs the bounded autonomous fix loop for one PR in `suggest` or `patch` mode. Patch mode checks out the same PR branch, applies deterministic low-risk fixes, commits without GPG signing, pushes without force, and repeats diagnostics. |
 | `ops-pr-finalize.yml` | Policy-controlled PR finalization and merge authority. Enforces diagnostics, expected head SHA, review-thread gates, merge policy, post-merge audit, and release dispatch. |
@@ -84,6 +89,41 @@ Use:
 ```powershell
 node scripts/ops-policy.mjs check --owner oaslananka-lab --repo boardguard
 node scripts/ops-policy.mjs patch-mode --owner oaslananka-lab --repo boardguard
+```
+
+## Ops API
+
+The Cloudflare Worker API for the future ChatGPT App / ops console is:
+
+```text
+https://ops-api.oaslananka.dev
+```
+
+Current API path:
+
+```text
+GitHub OAuth identity only
+-> _ops workflow_dispatch
+-> GitHub App installation token
+-> source/mirror policy
+```
+
+OAuth scopes stay limited to:
+
+```text
+read:user user:email
+```
+
+OAuth tokens are not used for repository mutation.
+
+See:
+
+```text
+docs/ops-api-worker.md
+docs/chatgpt-app-ops-console.md
+docs/chatgpt-app-tool-reference.md
+docs/cloudflare-deploy.md
+docs/source-mirror-topology.md
 ```
 
 ## Onboard a Repository

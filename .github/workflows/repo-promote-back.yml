@@ -1,0 +1,390 @@
+name: Repo Promote Back
+
+on:
+  workflow_dispatch:
+    inputs:
+      mirror_owner:
+        required: true
+        type: string
+      mirror_repo:
+        required: true
+        type: string
+      source_owner:
+        required: false
+        default: ""
+        type: string
+      source_repo:
+        required: false
+        default: ""
+        type: string
+      mirror_ref:
+        required: true
+        type: string
+      source_base_branch:
+        required: false
+        default: main
+        type: string
+      promote_branch:
+        required: false
+        default: ""
+        type: string
+      mode:
+        required: true
+        default: pull_request
+        type: choice
+        options:
+          - pull_request
+          - update_existing_pr
+          - dry_run
+      merge_source_pr:
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: repo-promote-back-${{ inputs.mirror_owner }}-${{ inputs.mirror_repo }}-${{ inputs.mirror_ref }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+      GCM_INTERACTIVE: Never
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Resolve source and mirror
+        id: resolved
+        env:
+          MIRROR_OWNER: ${{ inputs.mirror_owner }}
+          MIRROR_REPO: ${{ inputs.mirror_repo }}
+          SOURCE_OWNER_INPUT: ${{ inputs.source_owner }}
+          SOURCE_REPO_INPUT: ${{ inputs.source_repo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          node scripts/ops-policy.mjs get --owner "${MIRROR_OWNER}" --repo "${MIRROR_REPO}" > out/mirror-policy.json
+          node scripts/ops-policy.mjs topology --owner "${MIRROR_OWNER}" --repo "${MIRROR_REPO}" > out/topology.json
+          role="$(jq -r '.repository_role.role' out/mirror-policy.json)"
+          if [[ "${role}" != "ci_cd_mirror" ]]; then
+            echo "role=${role}" >> "$GITHUB_OUTPUT"
+            echo "source_owner=${SOURCE_OWNER_INPUT}" >> "$GITHUB_OUTPUT"
+            echo "source_repo=${SOURCE_REPO_INPUT}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          source_owner="${SOURCE_OWNER_INPUT:-$(jq -r '.mirror.source_owner' out/mirror-policy.json)}"
+          source_repo="${SOURCE_REPO_INPUT:-$(jq -r '.mirror.source_repo' out/mirror-policy.json)}"
+          {
+            echo "role=${role}"
+            echo "source_owner=${source_owner}"
+            echo "source_repo=${source_repo}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create mirror GitHub App token
+        id: mirror_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.mirror_owner }}
+          repositories: ${{ inputs.mirror_repo }}
+
+      - name: Create source GitHub App token
+        id: source_app
+        continue-on-error: true
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.resolved.outputs.source_owner }}
+          repositories: ${{ steps.resolved.outputs.source_repo }}
+
+      - name: Promote mirror changes to source
+        env:
+          OPS_TOKEN: ${{ github.token }}
+          MIRROR_TOKEN: ${{ steps.mirror_app.outputs.token }}
+          SOURCE_TOKEN: ${{ steps.source_app.outputs.token }}
+          MIRROR_OWNER: ${{ inputs.mirror_owner }}
+          MIRROR_REPO: ${{ inputs.mirror_repo }}
+          SOURCE_OWNER: ${{ steps.resolved.outputs.source_owner }}
+          SOURCE_REPO: ${{ steps.resolved.outputs.source_repo }}
+          MIRROR_REF: ${{ inputs.mirror_ref }}
+          SOURCE_BASE_BRANCH: ${{ inputs.source_base_branch }}
+          PROMOTE_BRANCH_INPUT: ${{ inputs.promote_branch }}
+          MODE: ${{ inputs.mode }}
+          MERGE_SOURCE_PR: ${{ inputs.merge_source_pr }}
+          ROLE: ${{ steps.resolved.outputs.role }}
+          API_VERSION: "2026-03-10"
+          OPS_REPO: oaslananka-lab/_ops
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="${GITHUB_WORKSPACE}/out"
+          RAW="${OUT}/raw"
+          WORK="${RUNNER_TEMP}/promote-back"
+          mkdir -p "${RAW}" "${WORK}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/promote-back-${MIRROR_OWNER}-${MIRROR_REPO}.json"
+          : > "${STEPS}"
+
+          mirror_full="${MIRROR_OWNER}/${MIRROR_REPO}"
+          source_full="${SOURCE_OWNER}/${SOURCE_REPO}"
+          final_state="promote_failed"
+          source_pr_number=""
+          source_pr_url=""
+          merge_commit_sha=""
+          mirror_sha=""
+          promote_branch="${PROMOTE_BRANCH_INPUT}"
+          audit_run_url=""
+          release_plan_run_url=""
+
+          source_api() {
+            GH_TOKEN="${SOURCE_TOKEN}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          ops_gh() {
+            GH_TOKEN="${OPS_TOKEN}" gh "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          finish() {
+            jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+            jq -n \
+              --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+              --arg mirror "${mirror_full}" \
+              --arg source "${source_full}" \
+              --arg mirror_ref "${MIRROR_REF}" \
+              --arg mirror_sha "${mirror_sha}" \
+              --arg source_base_branch "${SOURCE_BASE_BRANCH}" \
+              --arg promote_branch "${promote_branch}" \
+              --arg mode "${MODE}" \
+              --arg source_pr_number "${source_pr_number}" \
+              --arg source_pr_url "${source_pr_url}" \
+              --arg merge_commit_sha "${merge_commit_sha}" \
+              --arg audit_run_url "${audit_run_url}" \
+              --arg release_plan_run_url "${release_plan_run_url}" \
+              --arg final_state "${final_state}" \
+              --slurpfile steps "${OUT}/steps.json" \
+              '{
+                generated_at: $generated_at,
+                mirror: $mirror,
+                source: $source,
+                mirror_ref: $mirror_ref,
+                mirror_sha: (if $mirror_sha == "" then null else $mirror_sha end),
+                source_base_branch: $source_base_branch,
+                promote_branch: (if $promote_branch == "" then null else $promote_branch end),
+                mode: $mode,
+                source_pr_number: (if $source_pr_number == "" then null else ($source_pr_number|tonumber) end),
+                source_pr_url: (if $source_pr_url == "" then null else $source_pr_url end),
+                merge_commit_sha: (if $merge_commit_sha == "" then null else $merge_commit_sha end),
+                validation: {
+                  repo_audit: (if $audit_run_url == "" then null else $audit_run_url end),
+                  repo_release_plan: (if $release_plan_run_url == "" then null else $release_plan_run_url end)
+                },
+                final_state: $final_state,
+                steps: $steps[0]
+              }' > "${REPORT}"
+          }
+          trap finish EXIT
+
+          if [[ "${ROLE}" != "ci_cd_mirror" ]]; then
+            final_state="topology_invalid"
+            record "policy" "invalid" "${mirror_full} role=${ROLE}"
+            exit 0
+          fi
+          if [[ -z "${SOURCE_TOKEN}" ]]; then
+            final_state="topology_invalid"
+            record "source_token" "missing" "GitHub App is not installed on ${source_full} or lacks access"
+            exit 0
+          fi
+
+          node scripts/ops-policy.mjs get --owner "${SOURCE_OWNER}" --repo "${SOURCE_REPO}" > "${OUT}/source-policy.json" || true
+          source_role="$(jq -r '.repository_role.role // "unknown"' "${OUT}/source-policy.json" 2>/dev/null || echo unknown)"
+          if [[ "${source_role}" != "canonical_source" ]]; then
+            record "source_policy" "warning" "${source_full} role=${source_role}"
+          fi
+
+          audit_run_url="$(ops_gh run list --repo "${OPS_REPO}" --workflow repo-audit.yml --limit 20 --json conclusion,url |
+            jq -r '.[] | select(.conclusion == "success") | .url' | head -n 1)"
+          release_plan_run_url="$(ops_gh run list --repo "${OPS_REPO}" --workflow repo-release-plan.yml --limit 20 --json conclusion,url |
+            jq -r '.[] | select(.conclusion == "success") | .url' | head -n 1)"
+          if [[ -z "${audit_run_url}" ]]; then
+            final_state="mirror_validation_missing"
+            record "validation" "missing" "No successful repo-audit.yml run found"
+            exit 0
+          fi
+          record "validation" "audit_found" "${audit_run_url}"
+          if [[ -n "${release_plan_run_url}" ]]; then
+            record "validation" "release_plan_found" "${release_plan_run_url}"
+          fi
+
+          git config --global user.name "oaslananka-repo-ops[bot]"
+          git config --global user.email "oaslananka-repo-ops[bot]@users.noreply.github.com"
+          git config --global commit.gpgsign false
+          git config --global tag.gpgSign false
+
+          source_url="https://x-access-token:${SOURCE_TOKEN}@github.com/${source_full}.git"
+          mirror_url="https://x-access-token:${MIRROR_TOKEN}@github.com/${mirror_full}.git"
+          git clone --no-tags "${source_url}" "${WORK}/source" >/dev/null 2>&1
+          cd "${WORK}/source"
+          git remote add mirror "${mirror_url}"
+          git fetch origin "${SOURCE_BASE_BRANCH}:refs/remotes/origin/${SOURCE_BASE_BRANCH}" >/dev/null 2>&1
+          if git fetch mirror "${MIRROR_REF}:refs/remotes/mirror/promote" >/dev/null 2>&1; then
+            :
+          else
+            git fetch mirror "refs/heads/${MIRROR_REF}:refs/remotes/mirror/promote" >/dev/null 2>&1
+          fi
+          mirror_sha="$(git rev-parse refs/remotes/mirror/promote)"
+          short_sha="${mirror_sha:0:12}"
+          if [[ -z "${promote_branch}" ]]; then
+            promote_branch="promote/${MIRROR_REPO}/${short_sha}"
+          fi
+
+          git diff --binary "refs/remotes/origin/${SOURCE_BASE_BRANCH}" "refs/remotes/mirror/promote" -- . > "${OUT}/source-to-mirror.diff" || true
+          if [[ ! -s "${OUT}/source-to-mirror.diff" ]]; then
+            final_state="no_diff"
+            record "diff" "empty" "${source_full} already matches ${mirror_full}@${MIRROR_REF}"
+            exit 0
+          fi
+
+          if [[ "${MODE}" == "dry_run" ]]; then
+            final_state="dry_run_clean"
+            record "diff" "present" "dry run only"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code origin "refs/heads/${promote_branch}" >/dev/null 2>&1; then
+            git fetch origin "refs/heads/${promote_branch}:refs/remotes/origin/${promote_branch}" >/dev/null 2>&1
+            git checkout -B "${promote_branch}" "refs/remotes/origin/${promote_branch}"
+            record "source_branch" "exists" "${promote_branch}"
+          else
+            git checkout -B "${promote_branch}" "refs/remotes/origin/${SOURCE_BASE_BRANCH}"
+            record "source_branch" "created" "${promote_branch}"
+          fi
+
+          if ! git apply --index "${OUT}/source-to-mirror.diff"; then
+            final_state="promote_failed"
+            record "diff" "apply_failed" "manual conflict resolution required"
+            exit 0
+          fi
+          if [[ -z "$(git status --porcelain)" ]]; then
+            final_state="no_diff"
+            record "diff" "no_worktree_change" "patch resulted in no diff"
+            exit 0
+          fi
+          git -c commit.gpgsign=false commit --no-gpg-sign -m "chore: promote validated mirror changes from ${MIRROR_REPO}" >/dev/null
+          git push origin "HEAD:${promote_branch}" >/dev/null 2>&1
+          final_state="source_branch_created"
+          record "source_branch" "pushed" "${promote_branch}"
+
+          source_api --method GET "repos/${source_full}/pulls" -f state=open -f head="${SOURCE_OWNER}:${promote_branch}" > "${RAW}/existing-prs.json" || echo "[]" > "${RAW}/existing-prs.json"
+          source_pr_number="$(jq -r '.[0].number // ""' "${RAW}/existing-prs.json")"
+          pr_body="${OUT}/source-pr-body.md"
+          cat > "${pr_body}" <<EOF
+          Promote validated CI/CD mirror changes back to the canonical source repository.
+
+          Source repository: ${source_full}
+          Mirror repository: ${mirror_full}
+          Mirror ref: ${MIRROR_REF}
+          Mirror SHA: ${mirror_sha}
+
+          Validation:
+          - repo-audit: ${audit_run_url}
+          - repo-release-plan: ${release_plan_run_url:-not required or not found}
+
+          Policy:
+          - source of truth: ${source_full}
+          - execution mirror: ${mirror_full}
+          - publish state: disabled unless repository policy enables it
+          EOF
+
+          if [[ -n "${source_pr_number}" ]]; then
+            source_api --method PATCH "repos/${source_full}/pulls/${source_pr_number}" \
+              -f body="$(cat "${pr_body}")" > "${RAW}/source-pr.json"
+            final_state="source_pr_updated"
+            record "source_pr" "updated" "#${source_pr_number}"
+          else
+            jq -n \
+              --arg title "chore: promote validated mirror changes from ${MIRROR_REPO}" \
+              --arg head "${promote_branch}" \
+              --arg base "${SOURCE_BASE_BRANCH}" \
+              --rawfile body "${pr_body}" \
+              '{title:$title,head:$head,base:$base,body:$body,maintainer_can_modify:true,draft:false}' > "${OUT}/create-pr.json"
+            source_api --method POST "repos/${source_full}/pulls" --input "${OUT}/create-pr.json" > "${RAW}/source-pr.json"
+            source_pr_number="$(jq -r '.number' "${RAW}/source-pr.json")"
+            final_state="source_pr_opened"
+            record "source_pr" "opened" "#${source_pr_number}"
+          fi
+          source_pr_url="$(jq -r '.html_url // ""' "${RAW}/source-pr.json")"
+
+          if [[ "${MERGE_SOURCE_PR}" == "true" ]]; then
+            if [[ "$(jq -r '.pr.merge // false' "${OUT}/source-policy.json" 2>/dev/null || echo false)" != "true" ]]; then
+              final_state="source_merge_disabled"
+              record "source_merge" "disabled" "source policy pr.merge=false"
+              exit 0
+            fi
+            source_api --method GET "repos/${source_full}/pulls/${source_pr_number}" > "${RAW}/source-pr-current.json"
+            source_head_sha="$(jq -r '.head.sha' "${RAW}/source-pr-current.json")"
+            jq -n \
+              --arg merge_method "squash" \
+              --arg sha "${source_head_sha}" \
+              --arg commit_title "chore: promote validated mirror changes from ${MIRROR_REPO}" \
+              --arg commit_message "Promote CI/CD mirror validation result back to canonical source." \
+              '{merge_method:$merge_method,sha:$sha,commit_title:$commit_title,commit_message:$commit_message}' > "${OUT}/merge-source-pr.json"
+            if source_api --method PUT "repos/${source_full}/pulls/${source_pr_number}/merge" --input "${OUT}/merge-source-pr.json" > "${RAW}/source-merge.json"; then
+              merge_commit_sha="$(jq -r '.sha // ""' "${RAW}/source-merge.json")"
+              final_state="source_pr_merged"
+              record "source_merge" "merged" "${merge_commit_sha}"
+              ops_gh workflow run repo-mirror-sync.yml --repo "${OPS_REPO}" --ref main \
+                -f source_owner="${SOURCE_OWNER}" \
+                -f source_repo="${SOURCE_REPO}" \
+                -f target_owner="${MIRROR_OWNER}" \
+                -f target_repo="${MIRROR_REPO}" || true
+            else
+              final_state="source_merge_failed"
+              record "source_merge" "failed" "#${source_pr_number}"
+            fi
+          fi
+
+          {
+            echo "### Repo Promote Back"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Source | ${source_full} |"
+            echo "| Mirror | ${mirror_full} |"
+            echo "| Mirror ref | ${MIRROR_REF} |"
+            echo "| Promote branch | ${promote_branch} |"
+            echo "| Source PR | ${source_pr_url:-none} |"
+            echo "| Final state | ${final_state} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload promote-back report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: promote-back-${{ inputs.mirror_owner }}-${{ inputs.mirror_repo }}
+          path: out/
+          retention-days: 14

@@ -142,7 +142,7 @@ jobs:
             fi
           fi
 
-          if [[ "${profile}" != "off" && "${profile}" != "suggest" && "${profile}" != "patch" && "${profile}" != "guarded" && "${profile}" != "full" && "${profile}" != "breakglass" ]]; then
+          if [[ "${profile}" != "off" && "${profile}" != "suggest" && "${profile}" != "source" && "${profile}" != "patch" && "${profile}" != "guarded" && "${profile}" != "full" && "${profile}" != "breakglass" ]]; then
             final_state="profile_not_supported"
             issues+=("Unsupported profile: ${profile}")
           fi
@@ -204,6 +204,7 @@ jobs:
               app_slug: $app_slug,
               installation_id: $installation_id,
               policy_profile: $policy[0].autonomy.profile,
+              repository_role: $policy[0].repository_role.role,
               issues: $issues[0],
               warnings: $warnings[0],
               observations: {

@@ -4,6 +4,11 @@ autonomy:
   enabled: true
   profile: guarded
 
+repository_role:
+  role: unknown
+  source_of_truth_owner: oaslananka
+  execution_owner: oaslananka-lab
+
 agent:
   patch: true
   patch_mode_on_check_run_failure: auto
@@ -48,6 +53,28 @@ publish:
   require_environment: production
   require_tag_pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
   trusted_publishing_only: true
+
+mirror:
+  enabled: false
+  source_owner: ""
+  source_repo: ""
+  source_branch: main
+  mirror_owner: ""
+  mirror_repo: ""
+  mirror_branch: main
+  direction: source_to_mirror
+  promote_back: false
+  promote_method: pull_request
+  delete_promote_branch: true
+  require_source_mirror_sha_match_before_release: true
+  require_source_mirror_sha_match_before_publish: true
+  allow_mirror_only_closeout: false
+
+source:
+  accepts_promoted_prs: true
+  ci_delegated_to: oaslananka-lab
+  actions_expected_enabled: false
+  require_clean_mirror_validation: true
 
 rulesets:
   audit: true

@@ -8,9 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const CONFIG_DIR = path.join(ROOT, "config");
 const DEFAULT_POLICY = path.join(CONFIG_DIR, "repo-autonomy.default.yml");
-const PROFILES = new Set(["off", "suggest", "patch", "guarded", "full", "breakglass"]);
+const PROFILES = new Set(["off", "suggest", "source", "patch", "guarded", "full", "breakglass"]);
 const PATCH_MODES = new Set(["auto", "suggest", "patch"]);
 const MERGE_METHODS = new Set(["merge", "squash", "rebase"]);
+const REPOSITORY_ROLES = new Set(["unknown", "canonical_source", "ci_cd_mirror", "control_plane", "org_native"]);
+const MIRROR_DIRECTIONS = new Set(["source_to_mirror"]);
+const PROMOTE_METHODS = new Set(["pull_request"]);
 
 function stripInlineComment(value) {
   let quote = null;
@@ -120,6 +123,9 @@ export function validatePolicy(policy) {
   if (policy.version !== 1) throw new Error("version must be 1");
   requireType(policy, "autonomy.enabled", "boolean");
   requireEnum(policy, "autonomy.profile", PROFILES);
+  requireEnum(policy, "repository_role.role", REPOSITORY_ROLES);
+  requireType(policy, "repository_role.source_of_truth_owner", "string");
+  requireType(policy, "repository_role.execution_owner", "string");
   requireType(policy, "agent.patch", "boolean");
   requireEnum(policy, "agent.patch_mode_on_check_run_failure", PATCH_MODES);
   requireType(policy, "agent.max_iterations", "number");
@@ -149,6 +155,15 @@ export function validatePolicy(policy) {
     "release.create_github_release",
     "release.require_release_plan_clean",
     "publish.enabled",
+    "mirror.enabled",
+    "mirror.promote_back",
+    "mirror.delete_promote_branch",
+    "mirror.require_source_mirror_sha_match_before_release",
+    "mirror.require_source_mirror_sha_match_before_publish",
+    "mirror.allow_mirror_only_closeout",
+    "source.accepts_promoted_prs",
+    "source.actions_expected_enabled",
+    "source.require_clean_mirror_validation",
     "rulesets.audit",
     "rulesets.require_app_bypass_for_full",
     "safety.forbid_force_push",
@@ -161,6 +176,29 @@ export function validatePolicy(policy) {
     requireType(policy, field, "boolean");
   }
   requireEnum(policy, "pr.merge_method", MERGE_METHODS);
+  requireEnum(policy, "mirror.direction", MIRROR_DIRECTIONS);
+  requireEnum(policy, "mirror.promote_method", PROMOTE_METHODS);
+  for (const field of [
+    "mirror.source_owner",
+    "mirror.source_repo",
+    "mirror.source_branch",
+    "mirror.mirror_owner",
+    "mirror.mirror_repo",
+    "mirror.mirror_branch"
+  ]) {
+    requireType(policy, field, "string");
+  }
+  requireType(policy, "source.ci_delegated_to", "string");
+  if (policy.repository_role.role === "ci_cd_mirror" || policy.mirror.enabled) {
+    for (const field of ["mirror.source_owner", "mirror.source_repo", "mirror.mirror_owner", "mirror.mirror_repo"]) {
+      if (!getField(policy, field)) {
+        throw new Error(`${field} is required for mirror policies`);
+      }
+    }
+  }
+  if (policy.repository_role.role === "canonical_source" && policy.autonomy.profile !== "source") {
+    throw new Error("canonical_source policies must use autonomy.profile=source");
+  }
   return policy;
 }
 
@@ -187,10 +225,59 @@ export function getField(object, selector) {
 
 export function patchMode(policy) {
   if (!policy.autonomy.enabled) return "suggest";
-  if (policy.autonomy.profile === "off" || policy.autonomy.profile === "suggest") return "suggest";
+  if (["off", "suggest", "source"].includes(policy.autonomy.profile)) return "suggest";
   if (!policy.agent.patch) return "suggest";
   if (["patch", "guarded", "full", "breakglass"].includes(policy.autonomy.profile)) return "patch";
   return "suggest";
+}
+
+export function topology(policy, owner, repo) {
+  const role = policy.repository_role.role;
+  if (role === "ci_cd_mirror") {
+    return {
+      role,
+      source: `${policy.mirror.source_owner}/${policy.mirror.source_repo}`,
+      mirror: `${policy.mirror.mirror_owner}/${policy.mirror.mirror_repo}`,
+      promote_back: policy.mirror.promote_back
+    };
+  }
+  if (role === "canonical_source") {
+    return {
+      role,
+      source: `${owner}/${repo}`,
+      ci_delegated_to: policy.source.ci_delegated_to
+    };
+  }
+  return {
+    role,
+    repository: `${owner}/${repo}`,
+    source_of_truth_owner: policy.repository_role.source_of_truth_owner,
+    execution_owner: policy.repository_role.execution_owner
+  };
+}
+
+export function isMirror(policy) {
+  return policy.repository_role.role === "ci_cd_mirror" && policy.mirror.enabled === true;
+}
+
+export function sourceTarget(policy, owner, repo) {
+  if (isMirror(policy)) {
+    return {
+      owner: policy.mirror.source_owner,
+      repo: policy.mirror.source_repo,
+      full_name: `${policy.mirror.source_owner}/${policy.mirror.source_repo}`,
+      branch: policy.mirror.source_branch
+    };
+  }
+  if (policy.repository_role.role === "canonical_source") {
+    return {
+      owner,
+      repo,
+      full_name: `${owner}/${repo}`,
+      branch: "main"
+    };
+  }
+  return null;
 }
 
 function parseArgs(argv) {
@@ -217,8 +304,8 @@ function printValue(value) {
 
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  if (!["get", "check", "patch-mode"].includes(args.command)) {
-    throw new Error("Usage: ops-policy.mjs <get|check|patch-mode> --owner OWNER --repo REPO [--field a.b]");
+  if (!["get", "check", "patch-mode", "topology", "is-mirror", "source-target"].includes(args.command)) {
+    throw new Error("Usage: ops-policy.mjs <get|check|patch-mode|topology|is-mirror|source-target> --owner OWNER --repo REPO [--field a.b]");
   }
   const policy = resolvePolicy(args.owner, args.repo);
   if (args.command === "check") {
@@ -227,6 +314,18 @@ export function main(argv = process.argv.slice(2)) {
   }
   if (args.command === "patch-mode") {
     process.stdout.write(`${patchMode(policy)}\n`);
+    return;
+  }
+  if (args.command === "topology") {
+    printValue(topology(policy, args.owner, args.repo));
+    return;
+  }
+  if (args.command === "is-mirror") {
+    process.stdout.write(`${isMirror(policy)}\n`);
+    return;
+  }
+  if (args.command === "source-target") {
+    printValue(sourceTarget(policy, args.owner, args.repo));
     return;
   }
   if (args.field) {

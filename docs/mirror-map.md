@@ -4,7 +4,11 @@ Generated from GitHub repository inventory on 2026-05-09.
 
 Updated on 2026-05-10 after the Group B pilot mirrors were created in `oaslananka-lab`.
 
-| Personal (source) | Org (CI/CD mirror) | Sync status |
+Updated on 2026-05-11 to make the source/mirror authority model explicit.
+
+`oaslananka/*` is canonical source-of-truth. `oaslananka-lab/*` is the CI/CD mirror and execution workspace. Validated mirror changes must promote back to `oaslananka/*` unless a repo policy explicitly allows mirror-only closeout.
+
+| Personal canonical source | Lab CI/CD mirror | Sync status |
 |---|---|---|
 | oaslananka/a2a-mesh | oaslananka-lab/a2a-mesh | pending (main -> main) |
 | oaslananka/boardguard | oaslananka-lab/boardguard | pending (main -> main) |

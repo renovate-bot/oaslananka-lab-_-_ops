@@ -808,3 +808,69 @@ node --test tests/ops-policy.test.mjs  passed
 python -m py_compile services/ops_webhook/app.py  passed
 gitleaks git --log-opts=HEAD~20..HEAD --redact     passed
 ```
+
+---
+
+## 17. Update - source/mirror topology and ops API
+
+Generated: 2026-05-11
+
+Authority model:
+
+```text
+canonical source owner: oaslananka
+CI/CD mirror owner:     oaslananka-lab
+control-plane:          oaslananka-lab/_ops
+```
+
+New topology files:
+
+```text
+docs/source-mirror-topology.md
+config/repo-autonomy.default.yml
+config/repos/oaslananka/*.yml
+config/repos/oaslananka-lab/*.yml
+```
+
+New workflows:
+
+```text
+repo-topology-audit.yml
+repo-promote-back.yml
+repo-source-mirror-release-gate.yml
+deploy-ops-api-worker.yml
+```
+
+Cloudflare Worker:
+
+```text
+name:       oaslananka-ops-api
+route:      https://ops-api.oaslananka.dev
+health:     https://ops-api.oaslananka.dev/health
+KV state:   OAUTH_STATE
+KV session: OPS_SESSIONS
+```
+
+OAuth model:
+
+```text
+OAuth App:       oaslananka-ops-chatgpt-login
+callback:        https://ops-api.oaslananka.dev/oauth/github/callback
+scopes:          read:user user:email
+allowed login:   oaslananka
+repo mutation:   no OAuth token mutation; GitHub App only
+```
+
+OpenAI/Cloudflare/GitHub docs verified in:
+
+```text
+docs/chatgpt-app-ops-console.md
+```
+
+Current blocker:
+
+```text
+REPO_OPS_APP_PRIVATE_KEY is not present in Doppler all/main.
+Cloudflare Worker health and OAuth start work.
+Authenticated workflow dispatch endpoints need the GitHub App private key secret before repository mutation can work from ops-api.
+```

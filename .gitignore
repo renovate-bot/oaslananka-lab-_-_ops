@@ -12,3 +12,5 @@ __pycache__/
 *.pyc
 .env
 personal-actions-audit-*.json
+node_modules/
+.wrangler/

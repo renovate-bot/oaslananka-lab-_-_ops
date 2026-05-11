@@ -1,0 +1,313 @@
+name: Repo Topology Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        type: string
+      target_repo:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-topology-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout _ops
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Resolve topology
+        id: topo
+        env:
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > out/policy.json
+          node scripts/ops-policy.mjs topology --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > out/topology.json
+          role="$(jq -r '.repository_role.role' out/policy.json)"
+          if [[ "${role}" == "ci_cd_mirror" ]]; then
+            source_owner="$(jq -r '.mirror.source_owner' out/policy.json)"
+            source_repo="$(jq -r '.mirror.source_repo' out/policy.json)"
+            source_branch="$(jq -r '.mirror.source_branch' out/policy.json)"
+            mirror_owner="$(jq -r '.mirror.mirror_owner' out/policy.json)"
+            mirror_repo="$(jq -r '.mirror.mirror_repo' out/policy.json)"
+            mirror_branch="$(jq -r '.mirror.mirror_branch' out/policy.json)"
+          elif [[ "${role}" == "canonical_source" ]]; then
+            source_owner="${TARGET_OWNER}"
+            source_repo="${TARGET_REPO}"
+            source_branch="main"
+            mirror_owner="$(jq -r '.source.ci_delegated_to' out/policy.json)"
+            mirror_repo="${TARGET_REPO}"
+            mirror_branch="main"
+          else
+            source_owner="${TARGET_OWNER}"
+            source_repo="${TARGET_REPO}"
+            source_branch="main"
+            mirror_owner="${TARGET_OWNER}"
+            mirror_repo="${TARGET_REPO}"
+            mirror_branch="main"
+          fi
+          {
+            echo "role=${role}"
+            echo "source_owner=${source_owner}"
+            echo "source_repo=${source_repo}"
+            echo "source_branch=${source_branch}"
+            echo "mirror_owner=${mirror_owner}"
+            echo "mirror_repo=${mirror_repo}"
+            echo "mirror_branch=${mirror_branch}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create source GitHub App token
+        id: source_app
+        continue-on-error: true
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.topo.outputs.source_owner }}
+          repositories: ${{ steps.topo.outputs.source_repo }}
+
+      - name: Create mirror GitHub App token
+        id: mirror_app
+        continue-on-error: true
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.topo.outputs.mirror_owner }}
+          repositories: ${{ steps.topo.outputs.mirror_repo }}
+
+      - name: Audit topology
+        env:
+          OPS_TOKEN: ${{ github.token }}
+          SOURCE_TOKEN: ${{ steps.source_app.outputs.token }}
+          MIRROR_TOKEN: ${{ steps.mirror_app.outputs.token }}
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          ROLE: ${{ steps.topo.outputs.role }}
+          SOURCE_OWNER: ${{ steps.topo.outputs.source_owner }}
+          SOURCE_REPO: ${{ steps.topo.outputs.source_repo }}
+          SOURCE_BRANCH: ${{ steps.topo.outputs.source_branch }}
+          MIRROR_OWNER: ${{ steps.topo.outputs.mirror_owner }}
+          MIRROR_REPO: ${{ steps.topo.outputs.mirror_repo }}
+          MIRROR_BRANCH: ${{ steps.topo.outputs.mirror_branch }}
+          API_VERSION: "2026-03-10"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OUT="${GITHUB_WORKSPACE}/out"
+          RAW="${OUT}/raw"
+          ERR="${OUT}/errors"
+          WORK="${RUNNER_TEMP}/topology-audit"
+          mkdir -p "${RAW}" "${ERR}" "${WORK}"
+          STEPS="${OUT}/steps.ndjson"
+          REPORT="${OUT}/topology-audit-${TARGET_OWNER}-${TARGET_REPO}.json"
+          : > "${STEPS}"
+
+          source_full="${SOURCE_OWNER}/${SOURCE_REPO}"
+          mirror_full="${MIRROR_OWNER}/${MIRROR_REPO}"
+          final_state="audit_incomplete"
+          relation="unknown"
+          source_sha=""
+          mirror_sha=""
+          issues=()
+
+          token_for() {
+            local preferred="$1"
+            if [[ -n "${preferred}" ]]; then
+              printf '%s' "${preferred}"
+            else
+              printf '%s' "${OPS_TOKEN}"
+            fi
+          }
+
+          gh_api_token() {
+            local token="$1"
+            shift
+            GH_TOKEN="${token}" gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: ${API_VERSION}" \
+              "$@"
+          }
+
+          record() {
+            jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
+              '{name:$name,status:$status,details:$details}' >> "${STEPS}"
+          }
+
+          api_capture() {
+            local name="$1"
+            local token="$2"
+            local endpoint="$3"
+            shift 3
+            if gh_api_token "${token}" --method GET "${endpoint}" "$@" > "${RAW}/${name}.json" 2> "${ERR}/${name}.err"; then
+              jq -n --arg endpoint "${endpoint}" --slurpfile data "${RAW}/${name}.json" \
+                '{ok:true,endpoint:$endpoint,data:$data[0]}' > "${OUT}/${name}.json"
+              return 0
+            fi
+            jq -n --arg endpoint "${endpoint}" --arg error "$(cat "${ERR}/${name}.err")" \
+              '{ok:false,endpoint:$endpoint,error:$error}' > "${OUT}/${name}.json"
+            return 1
+          }
+
+          source_token="$(token_for "${SOURCE_TOKEN}")"
+          mirror_token="$(token_for "${MIRROR_TOKEN}")"
+
+          if [[ "${ROLE}" != "canonical_source" && "${ROLE}" != "ci_cd_mirror" && "${ROLE}" != "control_plane" && "${ROLE}" != "org_native" && "${ROLE}" != "unknown" ]]; then
+            final_state="policy_invalid"
+            issues+=("unsupported repository_role: ${ROLE}")
+          fi
+
+          if [[ "${ROLE}" == "ci_cd_mirror" && ( -z "${SOURCE_OWNER}" || -z "${SOURCE_REPO}" || -z "${MIRROR_OWNER}" || -z "${MIRROR_REPO}" ) ]]; then
+            final_state="policy_invalid"
+            issues+=("mirror policy is missing source or mirror coordinates")
+          fi
+
+          if ! api_capture source_repo "${source_token}" "repos/${source_full}"; then
+            final_state="source_missing"
+            issues+=("source repository is missing or unreadable: ${source_full}")
+          else
+            record "source_repo" "read" "${source_full}"
+          fi
+
+          if ! api_capture mirror_repo "${mirror_token}" "repos/${mirror_full}"; then
+            final_state="mirror_missing"
+            issues+=("mirror repository is missing or unreadable: ${mirror_full}")
+          else
+            record "mirror_repo" "read" "${mirror_full}"
+          fi
+
+          if [[ -z "${SOURCE_TOKEN}" && "${ROLE}" != "org_native" ]]; then
+            if [[ "${final_state}" == "audit_incomplete" ]]; then final_state="app_missing_on_source"; fi
+            issues+=("GitHub App token was not available for source: ${source_full}")
+          fi
+
+          if [[ -z "${MIRROR_TOKEN}" && "${ROLE}" != "canonical_source" ]]; then
+            if [[ "${final_state}" == "audit_incomplete" ]]; then final_state="app_missing_on_mirror"; fi
+            issues+=("GitHub App token was not available for mirror: ${mirror_full}")
+          fi
+
+          api_capture source_actions "${source_token}" "repos/${source_full}/actions/permissions" || true
+          api_capture mirror_actions "${mirror_token}" "repos/${mirror_full}/actions/permissions" || true
+          if [[ "$(jq -r '.data.enabled // true' "${OUT}/mirror_actions.json" 2>/dev/null || echo true)" != "true" ]]; then
+            final_state="actions_disabled_on_mirror"
+            issues+=("Actions are disabled on mirror: ${mirror_full}")
+          fi
+
+          if [[ -s "${RAW}/source_repo.json" && -s "${RAW}/mirror_repo.json" ]]; then
+            git init -q "${WORK}/repo"
+            git -C "${WORK}/repo" remote add source "https://x-access-token:${source_token}@github.com/${source_full}.git"
+            git -C "${WORK}/repo" remote add mirror "https://x-access-token:${mirror_token}@github.com/${mirror_full}.git"
+            git -C "${WORK}/repo" fetch --depth=100 source "${SOURCE_BRANCH}:refs/remotes/source/${SOURCE_BRANCH}" >/dev/null 2>&1 || true
+            git -C "${WORK}/repo" fetch --depth=100 mirror "${MIRROR_BRANCH}:refs/remotes/mirror/${MIRROR_BRANCH}" >/dev/null 2>&1 || true
+            source_sha="$(git -C "${WORK}/repo" rev-parse "refs/remotes/source/${SOURCE_BRANCH}" 2>/dev/null || true)"
+            mirror_sha="$(git -C "${WORK}/repo" rev-parse "refs/remotes/mirror/${MIRROR_BRANCH}" 2>/dev/null || true)"
+            if [[ -n "${source_sha}" && -n "${mirror_sha}" ]]; then
+              if [[ "${source_sha}" == "${mirror_sha}" ]]; then
+                relation="equal"
+                if [[ "${final_state}" == "audit_incomplete" ]]; then final_state="ready"; fi
+              elif git -C "${WORK}/repo" merge-base --is-ancestor "${mirror_sha}" "${source_sha}" 2>/dev/null; then
+                relation="mirror_behind"
+                final_state="mirror_behind"
+              elif git -C "${WORK}/repo" merge-base --is-ancestor "${source_sha}" "${mirror_sha}" 2>/dev/null; then
+                relation="mirror_ahead"
+                final_state="mirror_ahead"
+              else
+                relation="diverged"
+                final_state="diverged"
+              fi
+              record "sha_relation" "${relation}" "source=${source_sha} mirror=${mirror_sha}"
+            fi
+          fi
+
+          if [[ "${ROLE}" == "canonical_source" && "$(jq -r '.ok' "${OUT}/mirror_repo.json" 2>/dev/null || echo false)" != "true" ]]; then
+            final_state="mirror_missing"
+          fi
+
+          if [[ "${final_state}" == "audit_incomplete" && "${#issues[@]}" -eq 0 ]]; then
+            final_state="ready"
+          fi
+
+          printf '%s\n' "${issues[@]}" | jq -R 'select(length > 0)' | jq -s . > "${OUT}/issues.json"
+          jq -s '.' "${STEPS}" > "${OUT}/steps.json"
+          jq -n \
+            --arg generated_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+            --arg target "${TARGET_OWNER}/${TARGET_REPO}" \
+            --arg role "${ROLE}" \
+            --arg source "${source_full}" \
+            --arg mirror "${mirror_full}" \
+            --arg source_branch "${SOURCE_BRANCH}" \
+            --arg mirror_branch "${MIRROR_BRANCH}" \
+            --arg source_sha "${source_sha}" \
+            --arg mirror_sha "${mirror_sha}" \
+            --arg relation "${relation}" \
+            --arg final_state "${final_state}" \
+            --slurpfile policy "${OUT}/policy.json" \
+            --slurpfile topology "${OUT}/topology.json" \
+            --slurpfile issues "${OUT}/issues.json" \
+            --slurpfile source_repo "${OUT}/source_repo.json" \
+            --slurpfile mirror_repo "${OUT}/mirror_repo.json" \
+            --slurpfile source_actions "${OUT}/source_actions.json" \
+            --slurpfile mirror_actions "${OUT}/mirror_actions.json" \
+            --slurpfile steps "${OUT}/steps.json" \
+            '{
+              generated_at: $generated_at,
+              target: $target,
+              role: $role,
+              source: $source,
+              mirror: $mirror,
+              source_branch: $source_branch,
+              mirror_branch: $mirror_branch,
+              source_sha: (if $source_sha == "" then null else $source_sha end),
+              mirror_sha: (if $mirror_sha == "" then null else $mirror_sha end),
+              relation: $relation,
+              promote_back: ($policy[0].mirror.promote_back // false),
+              final_state: $final_state,
+              policy: $policy[0],
+              topology: $topology[0],
+              issues: $issues[0],
+              observations: {
+                source_repo: $source_repo[0],
+                mirror_repo: $mirror_repo[0],
+                source_actions: $source_actions[0],
+                mirror_actions: $mirror_actions[0]
+              },
+              steps: $steps[0]
+            }' > "${REPORT}"
+
+          {
+            echo "### Repo Topology Audit"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---:|"
+            echo "| Target | ${TARGET_OWNER}/${TARGET_REPO} |"
+            echo "| Role | ${ROLE} |"
+            echo "| Source | ${source_full} |"
+            echo "| Mirror | ${mirror_full} |"
+            echo "| Relation | ${relation} |"
+            echo "| Final state | ${final_state} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload topology audit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: topology-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/
+          retention-days: 14

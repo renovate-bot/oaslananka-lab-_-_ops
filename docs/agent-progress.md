@@ -366,3 +366,24 @@ Skipped:
   - Release PR auto-merge remained disabled by repository policy.
 
 Next: Continue with explicitly approved repository rollout or policy changes only.
+
+## 2026-05-11 - source/mirror topology and Cloudflare ops API
+
+Applied:
+  - Added source/mirror topology fields to repository autonomy policy.
+  - Changed personal `oaslananka/*` policies to `canonical_source` with `profile=source`.
+  - Changed lab pilot policies to `ci_cd_mirror` with promote-back enabled by default.
+  - Added topology resolver commands to `scripts/ops-policy.mjs`.
+  - Added `repo-topology-audit.yml`, `repo-promote-back.yml`, and `repo-source-mirror-release-gate.yml`.
+  - Updated `ops-pr-finalize.yml` so mirror merges dispatch promote-back when policy requires it.
+  - Updated `ops-release-orchestrator.yml` so release/publish is gated by source/mirror state.
+  - Added Cloudflare Worker `services/ops_api_worker` for the future ops console / ChatGPT App API.
+  - Deployed `oaslananka-ops-api` to `https://ops-api.oaslananka.dev`.
+  - Added GitHub Actions deployment workflow for the Worker.
+
+Validation:
+  - Policy topology tests passed locally.
+  - Worker typecheck, tests, lint, dry-run deploy, deploy, and health check passed locally.
+
+Known blocker:
+  - `REPO_OPS_APP_PRIVATE_KEY` is not present in Doppler `all/main`; authenticated Worker workflow-dispatch endpoints cannot mutate repositories until that secret is supplied to Cloudflare.

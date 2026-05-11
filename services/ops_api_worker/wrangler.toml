@@ -1,0 +1,23 @@
+name = "oaslananka-ops-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+workers_dev = false
+
+routes = [
+  { pattern = "ops-api.oaslananka.dev", custom_domain = true }
+]
+
+[vars]
+OPS_REPO = "oaslananka-lab/_ops"
+OPS_API_PUBLIC_BASE_URL = "https://ops-api.oaslananka.dev"
+OPS_APP_PUBLIC_BASE_URL = "https://ops.oaslananka.dev"
+ALLOWED_GITHUB_LOGINS = "oaslananka"
+GITHUB_OAUTH_CALLBACK_URL = "https://ops-api.oaslananka.dev/oauth/github/callback"
+
+[[kv_namespaces]]
+binding = "OAUTH_STATE"
+id = "968d8f0f7bee4f29bde39c77965070af"
+
+[[kv_namespaces]]
+binding = "OPS_SESSIONS"
+id = "bc4a4c811cb34ccdb5dd97dd6a1e8efc"

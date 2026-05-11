@@ -1,21 +1,36 @@
 version: 1
 extends: ../../repo-autonomy.default.yml
 
+repository_role:
+  role: canonical_source
+  source_of_truth_owner: oaslananka
+  execution_owner: oaslananka-lab
+
 autonomy:
   enabled: true
-  profile: suggest
+  profile: source
 
 agent:
   patch: false
   patch_mode_on_check_run_failure: suggest
 
 pr:
-  finalize: false
-  merge: false
+  finalize: true
+  merge: true
+  require_clean_checks: false
+  require_human_review: false
 
 release:
   enabled: false
+  delegated_to_mirror: true
   trigger_after_merge: false
 
 publish:
   enabled: false
+  delegated_to_mirror: true
+
+source:
+  accepts_promoted_prs: true
+  ci_delegated_to: oaslananka-lab
+  actions_expected_enabled: false
+  require_clean_mirror_validation: true

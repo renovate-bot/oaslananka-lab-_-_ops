@@ -94,6 +94,8 @@ jobs:
           audit_run_id=""
           release_plan_run_id=""
           release_orchestrator_run_id=""
+          promote_back_run_id=""
+          promote_back_state=""
           merge_commit_sha=""
           head_ref=""
           head_sha_before=""
@@ -145,6 +147,8 @@ jobs:
               --arg audit_run_id "${audit_run_id}" \
               --arg release_plan_run_id "${release_plan_run_id}" \
               --arg release_orchestrator_run_id "${release_orchestrator_run_id}" \
+              --arg promote_back_run_id "${promote_back_run_id}" \
+              --arg promote_back_state "${promote_back_state}" \
               --arg final_state "${final_state}" \
               --slurpfile steps "${OUT}/steps.json" \
               '{
@@ -163,6 +167,8 @@ jobs:
                 audit_run_id: (if $audit_run_id == "" then null else ($audit_run_id|tonumber) end),
                 release_plan_run_id: (if $release_plan_run_id == "" then null else ($release_plan_run_id|tonumber) end),
                 release_orchestrator_run_id: (if $release_orchestrator_run_id == "" then null else ($release_orchestrator_run_id|tonumber) end),
+                promote_back_run_id: (if $promote_back_run_id == "" then null else ($promote_back_run_id|tonumber) end),
+                promote_back_state: (if $promote_back_state == "" then null else $promote_back_state end),
                 final_state: $final_state,
                 steps: $steps[0]
               }' > "${REPORT}"
@@ -408,6 +414,52 @@ jobs:
             exit 0
           fi
           record "release_plan" "success" "run_id=${release_plan_run_id}"
+
+          repo_role="$(jq -r '.repository_role.role // "unknown"' "${OUT}/policy.json")"
+          if [[ "${repo_role}" == "ci_cd_mirror" && "$(jq -r '.mirror.promote_back // false' "${OUT}/policy.json")" == "true" ]]; then
+            promote_ref="$(jq -r '.mirror.mirror_branch // "main"' "${OUT}/policy.json")"
+            promote_back_run_id="$(dispatch_ops_workflow repo-promote-back.yml \
+              mirror_owner "${TARGET_OWNER}" \
+              mirror_repo "${TARGET_REPO}" \
+              mirror_ref "${promote_ref}" \
+              source_base_branch "$(jq -r '.mirror.source_branch // "main"' "${OUT}/policy.json")" \
+              mode "pull_request" \
+              merge_source_pr "false")" || {
+                final_state="mirror_merged_promote_back_failed"
+                record "promote_back" "dispatch_failed" "repo-promote-back.yml"
+                exit 0
+              }
+            if ! wait_ops_run "${promote_back_run_id}"; then
+              final_state="mirror_merged_promote_back_failed"
+              record "promote_back" "failed" "run_id=${promote_back_run_id}"
+              exit 0
+            fi
+            mkdir -p "${OUT}/promote-back"
+            ops_gh run download "${promote_back_run_id}" --repo "${OPS_REPO}" --name "promote-back-${TARGET_OWNER}-${TARGET_REPO}" --dir "${OUT}/promote-back" || true
+            promote_report="$(find "${OUT}/promote-back" -name 'promote-back-*.json' -print -quit)"
+            promote_back_state="$(if [[ -n "${promote_report}" ]]; then jq -r '.final_state // ""' "${promote_report}"; fi)"
+            record "promote_back" "completed" "run_id=${promote_back_run_id} state=${promote_back_state:-unknown}"
+            case "${promote_back_state}" in
+              source_pr_merged)
+                final_state="mirror_merged_source_pr_merged"
+                ;;
+              source_pr_opened|source_pr_updated|source_branch_created)
+                final_state="mirror_merged_source_pr_opened"
+                exit 0
+                ;;
+              no_diff)
+                final_state="mirror_only_closeout"
+                ;;
+              *)
+                final_state="mirror_merged_promote_back_failed"
+                exit 0
+                ;;
+            esac
+          elif [[ "${repo_role}" == "ci_cd_mirror" && "$(jq -r '.mirror.allow_mirror_only_closeout // false' "${OUT}/policy.json")" != "true" ]]; then
+            final_state="mirror_only_closeout"
+            record "promote_back" "not_enabled" "mirror-only closeout is not canonical"
+            exit 0
+          fi
 
           if [[ "$(jq -r '.release.enabled' "${OUT}/policy.json")" == "true" && "$(jq -r '.release.trigger_after_merge' "${OUT}/policy.json")" == "true" ]]; then
             release_orchestrator_run_id="$(dispatch_ops_workflow ops-release-orchestrator.yml \

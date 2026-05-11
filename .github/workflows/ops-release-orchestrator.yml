@@ -32,6 +32,10 @@ on:
         options:
           - "true"
           - "false"
+      source_mirror_gate:
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -71,6 +75,7 @@ jobs:
           MERGE_COMMIT_SHA: ${{ inputs.merge_commit_sha }}
           REQUESTED_ACTION: ${{ inputs.requested_action }}
           DRY_RUN: ${{ inputs.dry_run }}
+          SOURCE_MIRROR_GATE: ${{ inputs.source_mirror_gate }}
           API_VERSION: "2026-03-10"
           OPS_REPO: oaslananka-lab/_ops
         shell: bash
@@ -89,6 +94,8 @@ jobs:
           release_plan_run_id=""
           release_workflow_run_id=""
           publish_workflow_run_id=""
+          release_gate_run_id=""
+          release_gate_state=""
           release_pr_number=""
           tag_name=""
           publish_state="publish_disabled"
@@ -131,6 +138,8 @@ jobs:
               --argjson dry_run "$(if [[ "${DRY_RUN}" == "true" ]]; then echo true; else echo false; fi)" \
               --arg policy_profile "$(jq -r '.autonomy.profile // "unknown"' "${OUT}/policy.json" 2>/dev/null || echo unknown)" \
               --arg release_plan_run_id "${release_plan_run_id}" \
+              --arg release_gate_run_id "${release_gate_run_id}" \
+              --arg release_gate_state "${release_gate_state}" \
               --arg release_workflow_run_id "${release_workflow_run_id}" \
               --arg publish_workflow_run_id "${publish_workflow_run_id}" \
               --arg release_pr_number "${release_pr_number}" \
@@ -147,6 +156,8 @@ jobs:
                 dry_run: $dry_run,
                 policy_profile: $policy_profile,
                 release_plan_run_id: (if $release_plan_run_id == "" then null else ($release_plan_run_id|tonumber) end),
+                release_gate_run_id: (if $release_gate_run_id == "" then null else ($release_gate_run_id|tonumber) end),
+                release_gate_state: (if $release_gate_state == "" then null else $release_gate_state end),
                 release_workflow_run_id: (if $release_workflow_run_id == "" then null else ($release_workflow_run_id|tonumber) end),
                 publish_workflow_run_id: (if $publish_workflow_run_id == "" then null else ($publish_workflow_run_id|tonumber) end),
                 release_pr_number: (if $release_pr_number == "" then null else ($release_pr_number|tonumber) end),
@@ -273,6 +284,52 @@ jobs:
           fi
           if [[ "${REQUESTED_ACTION}" == "publish" || "${REQUESTED_ACTION}" == "release_and_publish" ]]; then
             publish_requested=true
+          fi
+
+          if [[ "${SOURCE_MIRROR_GATE}" != "passed" ]]; then
+            release_gate_run_id="$(dispatch_ops_workflow repo-source-mirror-release-gate.yml target_owner "${TARGET_OWNER}" target_repo "${TARGET_REPO}" release_ref "main" requested_action "${REQUESTED_ACTION}" dispatch_orchestrator "false")" || {
+              final_state="validation_missing"
+              release_gate_state="dispatch_failed"
+              record "source_mirror_gate" "dispatch_failed" "repo-source-mirror-release-gate.yml"
+              exit 0
+            }
+            if ! wait_ops_run "${release_gate_run_id}"; then
+              final_state="validation_missing"
+              release_gate_state="workflow_failed"
+              record "source_mirror_gate" "failed" "run_id=${release_gate_run_id}"
+              exit 0
+            fi
+            mkdir -p "${RAW}/release-gate"
+            if ops_gh run download "${release_gate_run_id}" --repo "${OPS_REPO}" --name "source-mirror-release-gate-${TARGET_OWNER}-${TARGET_REPO}" --dir "${RAW}/release-gate" >/dev/null 2>&1; then
+              gate_report="$(find "${RAW}/release-gate" -name 'source-mirror-release-gate-*.json' | head -n 1)"
+              if [[ -n "${gate_report}" ]]; then
+                release_gate_state="$(jq -r '.final_state // "unknown"' "${gate_report}")"
+              fi
+            fi
+            release_gate_state="${release_gate_state:-unknown}"
+            record "source_mirror_gate" "${release_gate_state}" "run_id=${release_gate_run_id}"
+            case "${release_gate_state}" in
+              ready)
+                ;;
+              publish_disabled)
+                publish_state="publish_disabled"
+                if [[ "${publish_requested}" == "true" && "${release_requested}" != "true" ]]; then
+                  final_state="publish_disabled"
+                  exit 0
+                fi
+                ;;
+              promote_back_required|source_mirror_mismatch|validation_missing|policy_invalid)
+                final_state="${release_gate_state}"
+                exit 0
+                ;;
+              *)
+                final_state="validation_missing"
+                exit 0
+                ;;
+            esac
+          else
+            release_gate_state="passed"
+            record "source_mirror_gate" "passed" "prevalidated"
           fi
 
           if [[ "${release_requested}" == "true" && "$(jq -r '.release.enabled' "${OUT}/policy.json")" != "true" ]]; then
