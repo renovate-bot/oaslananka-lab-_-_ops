@@ -284,20 +284,25 @@ jobs:
             record "source_branch" "created" "${promote_branch}"
           fi
 
-          if ! git apply --index "${OUT}/source-to-mirror.diff"; then
-            final_state="promote_failed"
-            record "diff" "apply_failed" "manual conflict resolution required"
-            exit 0
+          git diff --binary HEAD "refs/remotes/mirror/promote" -- . > "${OUT}/branch-to-mirror.diff" || true
+          if [[ -s "${OUT}/branch-to-mirror.diff" ]]; then
+            if ! git apply --index "${OUT}/branch-to-mirror.diff"; then
+              final_state="promote_failed"
+              record "diff" "apply_failed" "manual conflict resolution required"
+              exit 0
+            fi
+            if [[ -z "$(git status --porcelain)" ]]; then
+              final_state="no_diff"
+              record "diff" "no_worktree_change" "patch resulted in no diff"
+              exit 0
+            fi
+            git -c commit.gpgsign=false commit --no-gpg-sign -m "chore: promote validated mirror changes from ${MIRROR_REPO}" >/dev/null
+            git push origin "HEAD:${promote_branch}" >/dev/null 2>&1
+            record "source_branch" "pushed" "${promote_branch}"
+          else
+            record "diff" "already_applied" "${promote_branch} already matches ${mirror_full}@${MIRROR_REF}"
           fi
-          if [[ -z "$(git status --porcelain)" ]]; then
-            final_state="no_diff"
-            record "diff" "no_worktree_change" "patch resulted in no diff"
-            exit 0
-          fi
-          git -c commit.gpgsign=false commit --no-gpg-sign -m "chore: promote validated mirror changes from ${MIRROR_REPO}" >/dev/null
-          git push origin "HEAD:${promote_branch}" >/dev/null 2>&1
           final_state="source_branch_created"
-          record "source_branch" "pushed" "${promote_branch}"
 
           source_api --method GET "repos/${source_full}/pulls" -f state=open -f head="${SOURCE_OWNER}:${promote_branch}" > "${RAW}/existing-prs.json" || echo "[]" > "${RAW}/existing-prs.json"
           source_pr_number="$(jq -r '.[0].number // ""' "${RAW}/existing-prs.json")"

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import type { Env } from "../src/env";
+import { HttpError } from "../src/errors";
+import { buildPromoteBackInputs } from "../src/routes/promote";
 
 class MemoryKv {
   async get(): Promise<string | null> {
@@ -51,6 +53,87 @@ describe("worker routes", () => {
     const response = await worker.fetch(
       new Request("https://ops-api.oaslananka.dev/v1/repos/boardguard/topology-audit", {
         method: "POST"
+      }),
+      env()
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("unauthenticated promote-back returns 401", async () => {
+    const response = await worker.fetch(
+      new Request("https://ops-api.oaslananka.dev/v1/repos/boardguard/promote-back", {
+        method: "POST",
+        body: "{}"
+      }),
+      env()
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("empty promote-back body dispatches dry_run defaults", () => {
+    expect(buildPromoteBackInputs("boardguard", {})).toMatchObject({
+      mirror_owner: "oaslananka-lab",
+      mirror_repo: "boardguard",
+      mirror_ref: "main",
+      mode: "dry_run",
+      merge_source_pr: "false"
+    });
+  });
+
+  it("mode=pull_request dispatches pull_request", () => {
+    expect(buildPromoteBackInputs("boardguard", { mode: "pull_request" })).toMatchObject({
+      mode: "pull_request",
+      merge_source_pr: "false"
+    });
+  });
+
+  it("mode=update_existing_pr dispatches update_existing_pr", () => {
+    expect(buildPromoteBackInputs("boardguard", { mode: "update_existing_pr" })).toMatchObject({
+      mode: "update_existing_pr"
+    });
+  });
+
+  it("merge_source_pr=true dispatches true", () => {
+    expect(buildPromoteBackInputs("boardguard", { merge_source_pr: true })).toMatchObject({
+      merge_source_pr: "true"
+    });
+    expect(buildPromoteBackInputs("boardguard", { merge_source_pr: "true" })).toMatchObject({
+      merge_source_pr: "true"
+    });
+  });
+
+  it("invalid mode returns INVALID_PROMOTE_MODE before dispatch", () => {
+    expect(() => buildPromoteBackInputs("boardguard", { mode: "merge_everything" })).toThrow(HttpError);
+    try {
+      buildPromoteBackInputs("boardguard", { mode: "merge_everything" });
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      expect((error as HttpError).status).toBe(400);
+      expect((error as HttpError).code).toBe("INVALID_PROMOTE_MODE");
+    }
+  });
+
+  it("invalid mode route returns HTTP 400 without dispatch", async () => {
+    const response = await worker.fetch(
+      new Request("https://ops-api.oaslananka.dev/v1/repos/boardguard/promote-back", {
+        method: "POST",
+        body: JSON.stringify({ mode: "merge_everything" })
+      }),
+      env()
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INVALID_PROMOTE_MODE"
+      }
+    });
+  });
+
+  it("topology-audit still requires auth", async () => {
+    const response = await worker.fetch(
+      new Request("https://ops-api.oaslananka.dev/v1/repos/boardguard/topology-audit", {
+        method: "POST",
+        body: "{}"
       }),
       env()
     );
