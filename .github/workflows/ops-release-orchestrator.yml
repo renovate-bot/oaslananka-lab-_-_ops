@@ -228,6 +228,42 @@ jobs:
             ' "${RAW}/workflows.json" | head -n 1
           }
 
+          workflow_supports_dispatch() {
+            local path="$1"
+            local slug
+            slug="$(printf '%s' "${path}" | tr '/.' '__')"
+            local meta_file="${RAW}/workflow-${slug}.json"
+            local content_file="${RAW}/workflow-${slug}.yml"
+            if ! target_api --method GET "repos/${REPO}/contents/${path}" > "${meta_file}" 2> "${RAW}/workflow-${slug}.err"; then
+              record "publish_workflow" "content_unavailable" "${path}: $(cat "${RAW}/workflow-${slug}.err")"
+              return 1
+            fi
+            jq -r '.content // ""' "${meta_file}" | base64 -d > "${content_file}" 2>/dev/null || {
+              record "publish_workflow" "content_decode_failed" "${path}"
+              return 1
+            }
+            grep -Eq '(^|[[:space:]])workflow_dispatch:' "${content_file}"
+          }
+
+          find_preferred_dispatchable_workflow() {
+            local paths_json="$1"
+            local workflow
+            while IFS= read -r workflow; do
+              [[ -n "${workflow}" ]] || continue
+              if workflow_supports_dispatch "${workflow}"; then
+                echo "${workflow}"
+                return 0
+              fi
+              record "publish_workflow" "skipped_no_workflow_dispatch" "${workflow}"
+            done < <(jq -r --argjson paths "${paths_json}" '
+              .workflows as $workflows |
+              $paths[] as $path |
+              $workflows[]? |
+              select(.path == $path) |
+              .path
+            ' "${RAW}/workflows.json")
+          }
+
           watch_release_run() {
             local run_id="$1"
             [[ -n "${run_id}" ]] || return 1
@@ -364,7 +400,7 @@ jobs:
               ".github/workflows/release.yml",
               ".github/workflows/release-please.yml"
             ]')"
-            publish_workflow="$(find_preferred_workflow '[
+            publish_workflow="$(find_preferred_dispatchable_workflow '[
               ".github/workflows/publish-production.yml",
               ".github/workflows/publish.yml",
               ".github/workflows/npm-publish.yml",
@@ -372,6 +408,9 @@ jobs:
               ".github/workflows/vscode-publish.yml",
               ".github/workflows/open-vsx-publish.yml",
               ".github/workflows/mcp-registry-publish.yml",
+              ".github/workflows/mcp-registry.yml",
+              ".github/workflows/docker-publish.yml",
+              ".github/workflows/docker.yml",
               ".github/workflows/release.yml",
               ".github/workflows/release-please.yml"
             ]')"
@@ -458,6 +497,12 @@ jobs:
               before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
               if [[ "${publish_workflow}" == ".github/workflows/publish-production.yml" ]]; then
                 if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main -f ref="${publish_ref}" 2> "${RAW}/publish-workflow-dispatch.err"; then
+                  final_state="publish_workflow_failed"
+                  publish_state="publish_workflow_dispatch_failed"
+                  record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
+                fi
+              elif [[ "${publish_workflow}" == ".github/workflows/mcp-registry.yml" || "${publish_workflow}" == ".github/workflows/mcp-registry-publish.yml" ]]; then
+                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main -f publish=true -f target=official 2> "${RAW}/publish-workflow-dispatch.err"; then
                   final_state="publish_workflow_failed"
                   publish_state="publish_workflow_dispatch_failed"
                   record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
