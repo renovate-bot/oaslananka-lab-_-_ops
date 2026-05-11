@@ -457,7 +457,7 @@ jobs:
               fi
               before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
               if [[ "${publish_workflow}" == ".github/workflows/publish-production.yml" ]]; then
-                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref "${publish_ref}" -f ref="${publish_ref}" 2> "${RAW}/publish-workflow-dispatch.err"; then
+                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main -f ref="${publish_ref}" 2> "${RAW}/publish-workflow-dispatch.err"; then
                   final_state="publish_workflow_failed"
                   publish_state="publish_workflow_dispatch_failed"
                   record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
