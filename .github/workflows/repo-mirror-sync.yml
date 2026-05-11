@@ -126,6 +126,7 @@ jobs:
           source_sha=""
           target_sha_before=""
           target_sha_after=""
+          relation="unknown"
 
           finish() {
             local exit_code=$?
@@ -202,18 +203,29 @@ jobs:
 
           if [[ "${target_sha_before}" == "${source_sha}" ]]; then
             status="up_to_date"
+            relation="equal"
             record "default_branch" "up_to_date" "${default_branch}@${source_sha}"
           else
-            if [[ -n "${target_sha_before}" ]] && git merge-base --is-ancestor "${target_sha_before}" "${source_sha}"; then
+            if [[ -n "${target_sha_before}" ]] && git diff --quiet "${source_sha}" "refs/remotes/target/${default_branch}" -- .; then
+              status="up_to_date_tree_equal"
+              relation="tree_equal"
+              commits_synced="0"
+              record "default_branch" "up_to_date_tree_equal" "${default_branch} content already matches source ${source_sha}; target head remains ${target_sha_before}"
+            elif [[ -n "${target_sha_before}" ]] && git merge-base --is-ancestor "${target_sha_before}" "${source_sha}"; then
+              relation="mirror_behind"
               git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
             elif [[ -n "${target_sha_before}" ]]; then
-              git push --force-with-lease="refs/heads/${default_branch}:${target_sha_before}" \
-                target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
+              relation="diverged"
+              record "default_branch" "force_push_blocked" "${TARGET_FULL}/${default_branch} diverged from ${SOURCE_FULL}/${default_branch}; refusing force-push"
+              status="sync_pr_required"
             else
+              relation="initial_push"
               git push target "refs/remotes/origin/${default_branch}:refs/heads/${default_branch}"
             fi
-            status="synced"
-            record "default_branch" "synced" "${default_branch}@${source_sha}"
+            if [[ "${status}" != "up_to_date_tree_equal" && "${status}" != "sync_pr_required" ]]; then
+              status="synced"
+              record "default_branch" "synced" "${default_branch}@${source_sha}"
+            fi
           fi
 
           git push --tags target
@@ -237,6 +249,7 @@ jobs:
             --arg source_sha "${source_sha}" \
             --arg target_sha_before "${target_sha_before}" \
             --arg target_sha_after "${target_sha_after}" \
+            --arg relation "${relation}" \
             --argjson commits_synced "${commits_synced}" \
             --slurpfile steps "${OUT}/steps.json" \
             '{
@@ -253,6 +266,7 @@ jobs:
               source_sha: $source_sha,
               target_sha_before: (if $target_sha_before == "" then null else $target_sha_before end),
               target_sha_after: (if $target_sha_after == "" then null else $target_sha_after end),
+              relation: $relation,
               steps: $steps[0]
             }' > "${REPORT}"
 
@@ -265,6 +279,7 @@ jobs:
             echo "| Target | ${TARGET_FULL} |"
             echo "| Default branch | ${default_branch} |"
             echo "| Status | ${status} |"
+            echo "| Relation | ${relation} |"
             echo "| Commits synced | ${commits_synced} |"
           } >> "$GITHUB_STEP_SUMMARY"
 

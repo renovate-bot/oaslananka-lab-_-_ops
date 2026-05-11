@@ -195,6 +195,8 @@ jobs:
             fi
             if [[ "${source_sha}" == "${mirror_sha}" ]]; then
               relation="equal"
+            elif git -C "${WORK}/repo" diff --quiet "${source_sha}" "${mirror_sha}" -- .; then
+              relation="tree_equal"
             elif git -C "${WORK}/repo" merge-base --is-ancestor "${source_sha}" "${mirror_sha}" 2>/dev/null; then
               relation="mirror_contains_source"
             elif git -C "${WORK}/repo" merge-base --is-ancestor "${mirror_sha}" "${source_sha}" 2>/dev/null; then
@@ -211,7 +213,7 @@ jobs:
             if [[ "${publish_requested}" == "true" && "$(jq -r '.mirror.require_source_mirror_sha_match_before_publish' "${OUT}/policy.json")" == "true" ]]; then
               require_match=true
             fi
-            if [[ "${require_match}" == "true" && "${relation}" != "equal" ]]; then
+            if [[ "${require_match}" == "true" && "${relation}" != "equal" && "${relation}" != "tree_equal" && "${relation}" != "mirror_contains_source" ]]; then
               if [[ "$(jq -r '.mirror.promote_back' "${OUT}/policy.json")" == "true" ]]; then
                 final_state="promote_back_required"
               else
