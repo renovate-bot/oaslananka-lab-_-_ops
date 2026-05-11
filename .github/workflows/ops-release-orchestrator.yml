@@ -401,6 +401,9 @@ jobs:
               ".github/workflows/release-please.yml"
             ]')"
             publish_workflow="$(find_preferred_dispatchable_workflow '[
+              ".github/workflows/deploy-pages.yml",
+              ".github/workflows/pages.yml",
+              ".github/workflows/jekyll-gh-pages.yml",
               ".github/workflows/publish-production.yml",
               ".github/workflows/publish.yml",
               ".github/workflows/npm-publish.yml",
@@ -497,6 +500,12 @@ jobs:
               before="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
               if [[ "${publish_workflow}" == ".github/workflows/publish-production.yml" ]]; then
                 if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main -f ref="${publish_ref}" 2> "${RAW}/publish-workflow-dispatch.err"; then
+                  final_state="publish_workflow_failed"
+                  publish_state="publish_workflow_dispatch_failed"
+                  record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"
+                fi
+              elif [[ "${publish_workflow}" == ".github/workflows/deploy-pages.yml" || "${publish_workflow}" == ".github/workflows/pages.yml" || "${publish_workflow}" == ".github/workflows/jekyll-gh-pages.yml" ]]; then
+                if ! target_gh workflow run "${publish_workflow}" --repo "${REPO}" --ref main 2> "${RAW}/publish-workflow-dispatch.err"; then
                   final_state="publish_workflow_failed"
                   publish_state="publish_workflow_dispatch_failed"
                   record "publish_workflow" "dispatch_failed" "$(cat "${RAW}/publish-workflow-dispatch.err")"

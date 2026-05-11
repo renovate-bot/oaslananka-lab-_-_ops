@@ -35,3 +35,11 @@ test("unknown fallback still exists only after explicit rollout matchers", () =>
     assert.ok(markerIndex < unknownIndex, `${marker} is checked before unknown fallback`);
   }
 });
+
+test("publish and environment failures have patch paths", () => {
+  assert.match(workflow, /scaffold_publish_workflow/);
+  assert.match(workflow, /call_ensure_production_environment/);
+  assert.match(workflow, /update_action_pins/);
+  assert.match(workflow, /templates\/publish-production-npm\.yml/);
+  assert.match(workflow, /templates\/deploy-pages\.yml/);
+});

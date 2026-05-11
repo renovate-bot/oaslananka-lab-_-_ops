@@ -1,0 +1,5 @@
+{
+  "actions/checkout": "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+  "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+  "actions/setup-node": "48b55a011bda9f5d6aeb4c20d18409c9b40caa0d5"
+}

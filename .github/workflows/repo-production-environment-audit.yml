@@ -16,6 +16,14 @@ on:
         options:
           - "true"
           - "false"
+      mode:
+        required: false
+        default: ensure
+        type: choice
+        options:
+          - audit
+          - ensure
+          - reset_reviewers
 
 permissions:
   contents: read
@@ -50,12 +58,13 @@ jobs:
           TARGET_OWNER: ${{ inputs.target_owner }}
           TARGET_REPO: ${{ inputs.target_repo }}
           APPLY: ${{ inputs.apply }}
+          MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
-          args=(--owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" --environment production --reviewer-login oaslananka)
-          if [[ "${APPLY}" == "true" ]]; then
+          args=(--owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" --environment production --mode "${MODE}")
+          if [[ "${APPLY}" == "true" || "${MODE}" == "ensure" || "${MODE}" == "reset_reviewers" ]]; then
             args+=(--apply)
           fi
           set +e

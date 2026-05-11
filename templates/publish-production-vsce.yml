@@ -1,0 +1,72 @@
+name: Publish Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Ref/tag/SHA to publish
+        required: false
+        default: main
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  vscode-marketplace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: corepack enable
+      - run: |
+          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; elif [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run build --if-present
+      - name: Validate extension manifest
+        run: |
+          node -e "const p=require('./package.json'); for (const k of ['publisher','name','version']) if(!p[k]) throw new Error('EXTENSION_MANIFEST_INVALID '+k); if(!p.engines?.vscode) throw new Error('EXTENSION_MANIFEST_INVALID engines.vscode')"
+      - name: Publish VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+        run: |
+          token="${VSCE_PAT:-${VS_MARKETPLACE_TOKEN:-}}"
+          if [ -z "$token" ]; then echo "MARKETPLACE_SECRET_MISSING"; exit 1; fi
+          npx --yes @vscode/vsce publish --pat "$token"
+
+  open-vsx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: corepack enable
+      - run: |
+          if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; elif [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run build --if-present
+      - name: Publish Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+        run: |
+          token="${OVSX_PAT:-${OPEN_VSX_TOKEN:-}}"
+          if [ -z "$token" ]; then echo "OPEN_VSX_SECRET_MISSING"; exit 1; fi
+          npx --yes ovsx publish --pat "$token"

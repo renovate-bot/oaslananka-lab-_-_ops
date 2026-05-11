@@ -362,6 +362,38 @@ jobs:
             fi
           }
 
+          scaffold_publish_workflow() {
+            local repo_dir="$1"
+            local publish_dir="${repo_dir}/.github/workflows"
+            mkdir -p "${publish_dir}"
+            if [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
+              cp "${GITHUB_WORKSPACE}/templates/publish-production-npm.yml" "${publish_dir}/publish-production.yml"
+            fi
+            if { [[ "$(jq -r '.publish.vscode_marketplace // false' "${OUT}/policy.json")" == "true" ]] || [[ "$(jq -r '.publish.open_vsx // false' "${OUT}/policy.json")" == "true" ]]; } && [[ ! -f "${publish_dir}/publish-production.yml" ]]; then
+              cp "${GITHUB_WORKSPACE}/templates/publish-production-vsce.yml" "${publish_dir}/publish-production.yml"
+            fi
+            if [[ "$(jq -r '.publish.mcp_registry // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/mcp-registry.yml" ]]; then
+              cp "${GITHUB_WORKSPACE}/templates/mcp-registry.yml" "${publish_dir}/mcp-registry.yml"
+            fi
+            if [[ "$(jq -r '.publish.github_pages // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/deploy-pages.yml" ]]; then
+              cp "${GITHUB_WORKSPACE}/templates/deploy-pages.yml" "${publish_dir}/deploy-pages.yml"
+            fi
+          }
+
+          call_ensure_production_environment() {
+            GH_TOKEN="${TARGET_TOKEN}" node "${GITHUB_WORKSPACE}/scripts/ensure-production-environment.mjs" \
+              --owner "${TARGET_OWNER}" \
+              --repo "${TARGET_REPO}" \
+              --environment production \
+              --mode reset_reviewers \
+              --apply > "${OUT}/ensure-production-environment-${TARGET_OWNER}-${TARGET_REPO}.json"
+          }
+
+          update_action_pins() {
+            local repo_dir="$1"
+            node "${GITHUB_WORKSPACE}/scripts/update-action-pins.mjs" --root "${repo_dir}"
+          }
+
           apply_patch_for_class() {
             local classification="$1"
             local repo_dir="$2"
@@ -376,7 +408,16 @@ jobs:
               "missing lockfile")
                 generate_lockfile_if_missing "${repo_dir}"
                 ;;
-              "workflow syntax"|"simple permission"|"action pin update"|"review-thread patch"|"actionlint failure"|"publish workflow discovery missing"|"environment required missing"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
+              "publish workflow discovery missing")
+                scaffold_publish_workflow "${repo_dir}"
+                ;;
+              "environment required missing")
+                call_ensure_production_environment
+                ;;
+              "action pin update")
+                update_action_pins "${repo_dir}"
+                ;;
+              "workflow syntax"|"simple permission"|"review-thread patch"|"actionlint failure"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
                 return 2
                 ;;
               *)
