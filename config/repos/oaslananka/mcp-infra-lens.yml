@@ -19,6 +19,8 @@ pr:
   merge: true
   require_clean_checks: false
   require_human_review: false
+  allow_immediate_merge: true
+  require_expected_head_sha: true
 
 release:
   enabled: false
