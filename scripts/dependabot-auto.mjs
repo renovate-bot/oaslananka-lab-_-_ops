@@ -148,7 +148,8 @@ function addLabel(owner, full, number, label) {
 }
 
 function dispatchFixLoop(full, number) {
-  if (dispatchedFixLoops.has(full)) return false;
+  const key = `${full}#${number}`;
+  if (dispatchedFixLoops.has(key)) return false;
   const [owner, repo] = full.split("/");
   try {
     gh("oaslananka-lab", [
@@ -168,7 +169,7 @@ function dispatchFixLoop(full, number) {
       "-f",
       "max_iterations=10",
     ]);
-    dispatchedFixLoops.add(full);
+    dispatchedFixLoops.add(key);
     return true;
   } catch {
     return false;
@@ -214,12 +215,15 @@ async function approveAndMerge(owner, full, pr) {
   const error = merge.data?.message || `GitHub merge API returned ${merge.status}`;
   const mode = classifyMergeFailure(error);
   const rebaseRequested = mode === "merge_conflict_rebase_requested" ? requestDependabotRebase(owner, full, pr.number) : false;
+  const conflictLabel =
+    mode === "merge_conflict_rebase_requested" ? addLabel(owner, full, pr.number, "needs-human-conflict-resolution") : false;
   return {
     reviewed: review.ok,
     merged: false,
     mode,
     error,
     rebaseRequested,
+    conflictLabel,
     repository: `${repoOwner}/${repoName}`,
   };
 }
@@ -286,7 +290,7 @@ export async function main() {
   const writeReport = () => {
     fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
   };
-  for (const repoEntry of policyRepos()) {
+  for (const repoEntry of policyRepos().filter((entry) => entry.owner === "oaslananka-lab")) {
     let alerts = [];
     let prs = [];
     let repositoryError = null;

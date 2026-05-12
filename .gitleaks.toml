@@ -1,0 +1,15 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ignore local _ops scratch artifacts generated during repository audits"
+paths = [
+  '''^tmp-source-.*''',
+  '''^tmp-promote-report.*''',
+  '''^tmp-diag-.*''',
+  '''^tmp-.*''',
+  '''^ops-current-publish-runs.*''',
+  '''^ops-publish-runs.*''',
+  '''^out/.*''',
+  '''^out-final/.*'''
+]

@@ -44,6 +44,9 @@ publish:
   enabled: false
   no_publish_target_detected: true
 
+dependabot:
+  npm: true
+
 mirror:
   enabled: true
   source_owner: oaslananka

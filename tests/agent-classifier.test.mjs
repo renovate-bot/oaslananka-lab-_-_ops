@@ -7,6 +7,10 @@ const workflow = readFileSync(new URL("../.github/workflows/agent-fix-loop.yml",
 const requiredClassifications = [
   "actionlint failure",
   "publish workflow discovery missing",
+  "required check expected but not reported",
+  "ruleset required check mismatch",
+  "config-only pr blocked by ruleset",
+  "publish already published idempotent noop",
   "environment required missing",
   "npm publish auth missing",
   "npm token secret missing",
@@ -20,6 +24,9 @@ const requiredClassifications = [
   "ruleset codeowner review required",
   "ruleset bypass not configurable by api",
   "codeowner approval not automatable by app",
+  "github api rate limit",
+  "direct write blocked by ruleset",
+  "mirror sync conflict",
 ];
 
 test("agent fix-loop classifier names known rollout failure classes", () => {

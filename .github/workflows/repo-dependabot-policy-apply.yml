@@ -1,0 +1,46 @@
+name: Repo Dependabot Policy Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        required: true
+        type: string
+      merge:
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-dependabot-policy-apply-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - id: lab_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: oaslananka-lab
+      - id: source_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: oaslananka
+      - run: node scripts/dependabot-policy-apply.mjs --repo "${TARGET_REPO}" --merge "${MERGE}"
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          MERGE: ${{ inputs.merge }}
+          GH_TOKEN_LAB: ${{ steps.lab_app.outputs.token }}
+          GH_TOKEN_SOURCE: ${{ steps.source_app.outputs.token }}

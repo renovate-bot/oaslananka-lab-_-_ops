@@ -54,6 +54,33 @@ publish:
   require_tag_pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
   trusted_publishing_only: true
 
+dependabot:
+  managed: true
+  active_owner: oaslananka-lab
+  keep_source_file_for_parity: true
+  source_settings_disabled: true
+  mirror_settings_enabled: true
+  github_actions: true
+  github_actions_directory: /
+  github_actions_schedule_interval: weekly
+  github_actions_open_pull_requests_limit: 5
+  npm: false
+  npm_directory: /
+  npm_schedule_interval: daily
+  npm_open_pull_requests_limit: 10
+  uv: false
+  uv_directory: /
+  uv_schedule_interval: daily
+  uv_open_pull_requests_limit: 10
+  pip: false
+  pip_directory: /
+  pip_schedule_interval: daily
+  pip_open_pull_requests_limit: 10
+  bundler: false
+  bundler_directory: /
+  bundler_schedule_interval: weekly
+  bundler_open_pull_requests_limit: 5
+
 mirror:
   enabled: false
   source_owner: ""

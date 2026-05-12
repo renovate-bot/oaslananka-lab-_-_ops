@@ -9,4 +9,5 @@ test("fleet health uploads a JSON artifact and updates issue", () => {
   assert.match(workflow, /out\/fleet-health\.json/);
   assert.match(script, /\[fleet-health\]/);
   assert.match(script, /production_environment_required_reviewers_count/);
+  assert.match(script, /dependabot_prs_major_review_required_count/);
 });

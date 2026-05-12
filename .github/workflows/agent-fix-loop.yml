@@ -221,8 +221,16 @@ jobs:
               echo "simple permission"
             elif [[ -s "${combined}" ]] && grep -Eiq 'publish_workflow_not_found|publish workflow (missing|not found)|no supported publish workflow' "${combined}"; then
               echo "publish workflow discovery missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'expected check missing|required status checks.*expected|expected.*not reported|required check.*not reported' "${combined}"; then
+              echo "required check expected but not reported"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'ruleset.*required check.*mismatch|required status check.*not emitted|config-only PR.*ruleset' "${combined}"; then
+              echo "ruleset required check mismatch"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'config-only.*blocked|dependabot.yml.*required checks|paths-ignore.*required check' "${combined}"; then
+              echo "config-only pr blocked by ruleset"
             elif [[ -s "${combined}" ]] && grep -Eiq 'production environment (is )?(missing|not found)|environment_required_missing|environment.*production.*missing' "${combined}"; then
               echo "environment required missing"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'already published|already exists|cannot publish over previously published version|NPM_PACKAGE_VERSION_ALREADY_PUBLISHED|MARKETPLACE_VERSION_ALREADY_PUBLISHED|OPEN_VSX_VERSION_ALREADY_PUBLISHED' "${combined}"; then
+              echo "publish already published idempotent noop"
             elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_PUBLISH_E404|npm ERR! code E404|npm ERR! 404' "${combined}" && grep -Eiq 'NODE_AUTH_TOKEN[^A-Za-z0-9_]*(empty|missing|not set)|empty NODE_AUTH_TOKEN' "${combined}"; then
               echo "npm publish auth missing"
             elif [[ -s "${combined}" ]] && grep -Eiq 'NPM_TOKEN_SECRET_MISSING|NODE_AUTH_TOKEN.*(missing|not set)|npm ERR! code ENEEDAUTH|npm ERR! need auth|npm ERR! code E401' "${combined}"; then
@@ -247,6 +255,12 @@ jobs:
               echo "ruleset bypass not configurable by api"
             elif [[ -s "${combined}" ]] && grep -Eiq 'CODEOWNER_APPROVAL_NOT_AUTOMATABLE_BY_APP|codeowner approval.*not automatable|self.approval.*not allowed' "${combined}"; then
               echo "codeowner approval not automatable by app"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'API rate limit exceeded|secondary rate limit|rate limit.*reset' "${combined}"; then
+              echo "github api rate limit"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'protected branch hook declined|repository rule violations|changes must be made through a pull request|direct PAT write|signed commits required|verified signature' "${combined}"; then
+              echo "direct write blocked by ruleset"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'merge conflict|CONFLICT|Pull Request has merge conflicts|sync branch.*conflict' "${combined}"; then
+              echo "mirror sync conflict"
             elif [[ -s "${combined}" ]] && grep -Eiq 'pin.*action|unpinned|deprecated action|Node.js 20 actions are deprecated|uses:.*@[vV]?[0-9]' "${combined}"; then
               echo "action pin update"
             elif [[ -s "${combined}" ]] && grep -Eiq 'lockfile|frozen-lockfile|ERR_PNPM_OUTDATED_LOCKFILE|package-lock.json|pnpm-lock.yaml' "${combined}"; then
@@ -279,8 +293,14 @@ jobs:
               "publish workflow discovery missing")
                 printf '%s\n' "Add a supported production publish workflow or update release orchestrator discovery so publish policy maps to an existing workflow."
                 ;;
+              "required check expected but not reported"|"ruleset required check mismatch"|"config-only pr blocked by ruleset")
+                printf '%s\n' "Ensure every ruleset-required check name is emitted on every pull_request path, including config-only PRs; do not hide required workflows with paths-ignore."
+                ;;
               "environment required missing")
                 printf '%s\n' "Run the production environment audit/ensure workflow for the target repository and keep publish jobs gated by environment: production."
+                ;;
+              "publish already published idempotent noop")
+                printf '%s\n' "Treat duplicate package or extension versions as already_published/idempotent_noop and update publish-report evidence instead of retrying a fresh publish."
                 ;;
               "npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied")
                 printf '%s\n' "Keep npm publishing on the protected production environment and report the exact registry/trusted-publishing/secret blocker without printing secret values."
@@ -293,6 +313,15 @@ jobs:
                 ;;
               "ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
                 printf '%s\n' "Attempt policy-permitted approval, ruleset bypass, or CODEOWNERS remediation; if GitHub blocks it, record the exact HTTP response and run URL."
+                ;;
+              "github api rate limit")
+                printf '%s\n' "Back off and retry after the GitHub rate-limit reset; do not interpret rate-limited responses as missing files."
+                ;;
+              "direct write blocked by ruleset")
+                printf '%s\n' "Stop direct content writes and use the GitHub App branch/PR or _ops baseline workflow path with expected head SHA."
+                ;;
+              "mirror sync conflict")
+                printf '%s\n' "Regenerate the sync PR from current source and mirror heads, then merge only after required checks report success."
                 ;;
               "review-thread patch")
                 printf '%s\n' "Apply only the one-line suggested change from the unresolved review thread, then rerun diagnostics."
@@ -398,7 +427,9 @@ jobs:
               local destination="$2"
               sed "s#__TARGET_REPOSITORY__#${TARGET_OWNER}/${TARGET_REPO}#g" "${source_template}" > "${destination}"
             }
-            if [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
+            if [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && "$(jq -r '.publish.mcp_registry // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
+              render_template "${GITHUB_WORKSPACE}/templates/publish-production-mcp.yml" "${publish_dir}/publish-production.yml"
+            elif [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
               render_template "${GITHUB_WORKSPACE}/templates/publish-production-npm.yml" "${publish_dir}/publish-production.yml"
             fi
             if { [[ "$(jq -r '.publish.vscode_marketplace // false' "${OUT}/policy.json")" == "true" ]] || [[ "$(jq -r '.publish.open_vsx // false' "${OUT}/policy.json")" == "true" ]]; } && [[ ! -f "${publish_dir}/publish-production.yml" ]]; then
@@ -449,7 +480,7 @@ jobs:
               "action pin update")
                 update_action_pins "${repo_dir}"
                 ;;
-              "workflow syntax"|"simple permission"|"review-thread patch"|"actionlint failure"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app")
+              "workflow syntax"|"simple permission"|"review-thread patch"|"actionlint failure"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app"|"required check expected but not reported"|"ruleset required check mismatch"|"config-only pr blocked by ruleset"|"publish already published idempotent noop"|"github api rate limit"|"direct write blocked by ruleset"|"mirror sync conflict")
                 return 2
                 ;;
               *)

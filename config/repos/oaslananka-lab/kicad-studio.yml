@@ -46,6 +46,9 @@ publish:
   open_vsx: true
   require_environment: production
 
+dependabot:
+  npm: true
+
 mirror:
   enabled: true
   source_owner: oaslananka

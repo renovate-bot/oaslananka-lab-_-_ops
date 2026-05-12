@@ -86,6 +86,37 @@
       },
       "additionalProperties": true
     },
+    "dependabot": {
+      "type": "object",
+      "properties": {
+        "managed": { "type": "boolean" },
+        "active_owner": { "type": "string" },
+        "keep_source_file_for_parity": { "type": "boolean" },
+        "source_settings_disabled": { "type": "boolean" },
+        "mirror_settings_enabled": { "type": "boolean" },
+        "github_actions": { "type": "boolean" },
+        "github_actions_directory": { "type": "string" },
+        "github_actions_schedule_interval": { "type": "string" },
+        "github_actions_open_pull_requests_limit": { "type": "integer" },
+        "npm": { "type": "boolean" },
+        "npm_directory": { "type": "string" },
+        "npm_schedule_interval": { "type": "string" },
+        "npm_open_pull_requests_limit": { "type": "integer" },
+        "uv": { "type": "boolean" },
+        "uv_directory": { "type": "string" },
+        "uv_schedule_interval": { "type": "string" },
+        "uv_open_pull_requests_limit": { "type": "integer" },
+        "pip": { "type": "boolean" },
+        "pip_directory": { "type": "string" },
+        "pip_schedule_interval": { "type": "string" },
+        "pip_open_pull_requests_limit": { "type": "integer" },
+        "bundler": { "type": "boolean" },
+        "bundler_directory": { "type": "string" },
+        "bundler_schedule_interval": { "type": "string" },
+        "bundler_open_pull_requests_limit": { "type": "integer" }
+      },
+      "additionalProperties": true
+    },
     "mirror": {
       "type": "object",
       "properties": {

@@ -16,7 +16,7 @@ test("reset reviewers mode is accepted without reviewer login", () => {
   assert.equal(args.apply, true);
 });
 
-test("required secrets includes dockerhub but not ghcr or pages", () => {
+test("required secrets includes dockerhub but not ghcr, pages, or MCP registry OIDC", () => {
   const names = requiredSecretNames({
     publish: {
       npm: true,
@@ -26,5 +26,5 @@ test("required secrets includes dockerhub but not ghcr or pages", () => {
       mcp_registry: true,
     },
   });
-  assert.deepEqual(names, ["DOCKERHUB_TOKEN", "DOCKERHUB_USERNAME", "MCP_REGISTRY_TOKEN", "NODE_AUTH_TOKEN", "NPM_TOKEN"]);
+  assert.deepEqual(names, ["DOCKERHUB_TOKEN", "DOCKERHUB_USERNAME", "NODE_AUTH_TOKEN", "NPM_TOKEN"]);
 });

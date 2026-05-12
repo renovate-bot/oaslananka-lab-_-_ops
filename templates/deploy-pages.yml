@@ -35,3 +35,15 @@ jobs:
           path: "."
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128
+      - name: Write Pages publish report
+        if: always()
+        run: |
+          mkdir -p out
+          node -e 'const fs=require("fs"); const ok="${{ job.status }}"==="success"; fs.writeFileSync("out/publish-report-github-pages.json", JSON.stringify({channel:"github_pages",state:ok?"published":"failed",result:ok?"fresh_publish_success":"workflow_failure",blocker:ok?"":"GITHUB_PAGES_DEPLOY_FAILED",package:"",version:"",run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:[]}, null, 2)+"\n")'
+      - name: Upload Pages publish report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: publish-report-${{ github.event.repository.name }}-github-pages
+          path: out/publish-report-github-pages.json
+          if-no-files-found: ignore

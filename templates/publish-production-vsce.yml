@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -38,6 +37,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
+          package-manager-cache: false
       - run: corepack enable
       - run: |
           if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else npm install; fi
@@ -50,9 +50,34 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
         run: |
+          mkdir -p out
+          package_name="$(node -e "const p=require('./package.json'); console.log(p.name || '')")"
+          package_version="$(node -e "const p=require('./package.json'); console.log(p.version || '')")"
+          write_report() {
+            REPORT_STATE="$1" REPORT_RESULT="$2" REPORT_BLOCKER="$3" REPORT_PACKAGE="${package_name}" REPORT_VERSION="${package_version}" node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-vscode-marketplace.json", JSON.stringify({channel:"vscode_marketplace",state:process.env.REPORT_STATE,result:process.env.REPORT_RESULT,blocker:process.env.REPORT_BLOCKER,package:process.env.REPORT_PACKAGE,version:process.env.REPORT_VERSION,run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:[]}, null, 2)+"\n")'
+          }
           token="${VSCE_PAT:-${VS_MARKETPLACE_TOKEN:-}}"
-          if [ -z "$token" ]; then echo "MARKETPLACE_SECRET_MISSING"; exit 1; fi
-          npx --yes @vscode/vsce publish --pat "$token"
+          if [ -z "$token" ]; then echo "MARKETPLACE_SECRET_MISSING"; write_report "failed" "external_blocker" "MARKETPLACE_SECRET_MISSING"; exit 1; fi
+          set +e
+          output="$(npx --yes @vscode/vsce publish --pat "$token" 2>&1)"
+          status="$?"
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -eq 0 ]; then write_report "published" "fresh_publish_success" ""; exit 0; fi
+          if printf '%s\n' "$output" | grep -Eiq 'already.*published|version.*already|already exists'; then
+            echo "MARKETPLACE_VERSION_ALREADY_PUBLISHED"
+            write_report "already_published" "idempotent_noop" ""
+            exit 0
+          fi
+          write_report "failed" "workflow_failure" "MARKETPLACE_PUBLISH_FAILED"
+          exit "$status"
+      - name: Upload VS Code Marketplace publish report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: publish-report-${{ github.event.repository.name }}-vscode-marketplace
+          path: out/publish-report-vscode-marketplace.json
+          if-no-files-found: ignore
 
   open-vsx:
     if: ${{ github.repository == '__TARGET_REPOSITORY__' }}
@@ -67,6 +92,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
+          package-manager-cache: false
       - run: corepack enable
       - run: |
           if [ -f pnpm-lock.yaml ]; then corepack pnpm install --frozen-lockfile; else npm install; fi
@@ -76,6 +102,31 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
           OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
         run: |
+          mkdir -p out
+          package_name="$(node -e "const p=require('./package.json'); console.log(p.name || '')")"
+          package_version="$(node -e "const p=require('./package.json'); console.log(p.version || '')")"
+          write_report() {
+            REPORT_STATE="$1" REPORT_RESULT="$2" REPORT_BLOCKER="$3" REPORT_PACKAGE="${package_name}" REPORT_VERSION="${package_version}" node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-open-vsx.json", JSON.stringify({channel:"open_vsx",state:process.env.REPORT_STATE,result:process.env.REPORT_RESULT,blocker:process.env.REPORT_BLOCKER,package:process.env.REPORT_PACKAGE,version:process.env.REPORT_VERSION,run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:[]}, null, 2)+"\n")'
+          }
           token="${OVSX_PAT:-${OPEN_VSX_TOKEN:-}}"
-          if [ -z "$token" ]; then echo "OPEN_VSX_SECRET_MISSING"; exit 1; fi
-          npx --yes ovsx publish --pat "$token"
+          if [ -z "$token" ]; then echo "OPEN_VSX_SECRET_MISSING"; write_report "failed" "external_blocker" "OPEN_VSX_SECRET_MISSING"; exit 1; fi
+          set +e
+          output="$(npx --yes ovsx publish --pat "$token" 2>&1)"
+          status="$?"
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -eq 0 ]; then write_report "published" "fresh_publish_success" ""; exit 0; fi
+          if printf '%s\n' "$output" | grep -Eiq 'already.*published|version.*already|already exists'; then
+            echo "OPEN_VSX_VERSION_ALREADY_PUBLISHED"
+            write_report "already_published" "idempotent_noop" ""
+            exit 0
+          fi
+          write_report "failed" "workflow_failure" "OPEN_VSX_PUBLISH_FAILED"
+          exit "$status"
+      - name: Upload Open VSX publish report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: publish-report-${{ github.event.repository.name }}-open-vsx
+          path: out/publish-report-open-vsx.json
+          if-no-files-found: ignore

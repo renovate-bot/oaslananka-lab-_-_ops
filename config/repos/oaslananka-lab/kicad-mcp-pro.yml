@@ -46,6 +46,11 @@ publish:
   mcp_registry: true
   require_environment: production
 
+dependabot:
+  npm: true
+  uv: true
+  pip: true
+
 mirror:
   enabled: true
   source_owner: oaslananka

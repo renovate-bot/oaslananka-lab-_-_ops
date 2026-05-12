@@ -33,6 +33,10 @@ release:
 publish:
   enabled: false
 
+dependabot:
+  managed: false
+  github_actions: false
+
 mirror:
   enabled: true
   source_owner: oaslananka

@@ -47,6 +47,9 @@ publish:
   require_environment: production
   trusted_publishing_only: true
 
+dependabot:
+  npm: true
+
 mirror:
   enabled: true
   source_owner: oaslananka

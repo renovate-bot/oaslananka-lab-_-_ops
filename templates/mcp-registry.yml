@@ -35,7 +35,12 @@ jobs:
           persist-credentials: false
       - name: Verify server metadata
         run: |
-          test -f server.json || { echo "MCP_REGISTRY_CONFIG_MISSING"; exit 1; }
+          mkdir -p out
+          if [[ ! -f server.json ]]; then
+            echo "MCP_REGISTRY_CONFIG_MISSING"
+            node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-mcp-registry.json", JSON.stringify({channel:"mcp_registry",state:"failed",result:"external_blocker",blocker:"MCP_REGISTRY_CONFIG_MISSING",package:"",version:"",run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:["server.json missing"]}, null, 2)+"\n")'
+            exit 1
+          fi
       - name: Install mcp-publisher
         run: |
           set -euo pipefail
@@ -48,4 +53,22 @@ jobs:
       - name: Validate server.json
         run: mcp-publisher publish --dry-run
       - name: Publish
-        run: mcp-publisher publish
+        run: |
+          set +e
+          output="$(mcp-publisher publish 2>&1)"
+          status="$?"
+          set -e
+          printf '%s\n' "$output"
+          if [[ "${status}" -eq 0 ]]; then
+            node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-mcp-registry.json", JSON.stringify({channel:"mcp_registry",state:"published",result:"fresh_publish_success",blocker:"",package:"",version:"",run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:["mcp-publisher publish exited 0"]}, null, 2)+"\n")'
+            exit 0
+          fi
+          node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-mcp-registry.json", JSON.stringify({channel:"mcp_registry",state:"failed",result:"external_blocker",blocker:"MCP_REGISTRY_EXTERNAL_CONFIGURATION_REQUIRED",package:"",version:"",run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:["mcp-publisher publish failed"]}, null, 2)+"\n")'
+          exit "${status}"
+      - name: Upload MCP Registry publish report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: publish-report-${{ github.event.repository.name }}-mcp-registry
+          path: out/publish-report-mcp-registry.json
+          if-no-files-found: ignore

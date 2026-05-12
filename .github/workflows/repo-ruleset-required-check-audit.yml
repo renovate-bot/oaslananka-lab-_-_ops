@@ -1,0 +1,46 @@
+name: Repo Ruleset Required Check Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_owner:
+        required: true
+        default: oaslananka-lab
+        type: string
+      target_repo:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-ruleset-required-check-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - id: app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ inputs.target_owner }}
+          repositories: ${{ inputs.target_repo }}
+      - run: node scripts/ruleset-required-check-audit.mjs --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}"
+        env:
+          TARGET_OWNER: ${{ inputs.target_owner }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: ruleset-required-check-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}
+          path: out/ruleset-required-check-audit-${{ inputs.target_owner }}-${{ inputs.target_repo }}.json
+          retention-days: 14

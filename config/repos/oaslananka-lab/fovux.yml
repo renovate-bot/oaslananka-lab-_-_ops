@@ -44,6 +44,12 @@ publish:
   enabled: false
   no_publish_target_detected: true
 
+dependabot:
+  uv: true
+  uv_directory: /fovux-mcp
+  pip: true
+  pip_directory: /fovux-mcp
+
 mirror:
   enabled: true
   source_owner: oaslananka

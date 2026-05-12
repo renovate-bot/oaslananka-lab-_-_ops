@@ -58,7 +58,8 @@ export function requiredSecretNames(policy) {
     names.add("OPEN_VSX_TOKEN");
   }
   if (policy.publish?.mcp_registry) {
-    names.add("MCP_REGISTRY_TOKEN");
+    // The MCP Registry publisher uses GitHub OIDC. It does not require a
+    // long-lived registry token in the production environment.
   }
   if (policy.publish?.dockerhub) {
     names.add("DOCKERHUB_USERNAME");

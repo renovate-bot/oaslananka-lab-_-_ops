@@ -14,3 +14,16 @@ __pycache__/
 personal-actions-audit-*.json
 node_modules/
 .wrangler/
+tmp-source-*/
+tmp-promote-report*/
+tmp-diag-*/
+tmp-*/
+ops-current-publish-runs/
+ops-publish-runs/
+ops-health-evidence*.zip
+gitleaks-report*.json
+fleet-security-state*.json
+fleet-parity-audit*.json
+ops-*-report.json
+out/
+out-final/

@@ -25,6 +25,12 @@ test("classifies merge conflicts as rebase-requestable", () => {
   assert.equal(classifyMergeFailure("Pull Request has merge conflicts"), "merge_conflict_rebase_requested");
 });
 
+test("labels conflict class with the human conflict resolution path in script", async () => {
+  const text = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../scripts/dependabot-auto.mjs", import.meta.url), "utf8"));
+  assert.match(text, /needs-human-conflict-resolution/);
+  assert.match(text, /entry\.owner === "oaslananka-lab"/);
+});
+
 test("classifies required checks merge blockers", () => {
   assert.equal(
     classifyMergeFailure("11 of 11 required status checks have not succeeded: 1 expected."),

@@ -149,6 +149,44 @@ jobs:
             gh_retry "${TARGET_TOKEN}" "$@"
           }
 
+          classify_publish_report() {
+            local run_id="$1"
+            local report_dir="${OUT}/publish-reports"
+            rm -rf "${report_dir}"
+            mkdir -p "${report_dir}"
+            if target_gh run download "${run_id}" --repo "${REPO}" --pattern "publish-report-*" --dir "${report_dir}" >/dev/null 2> "${RAW}/publish-report-download.err"; then
+              local report_file
+              report_file="$(find "${report_dir}" -type f -name 'publish-report*.json' -print -quit)"
+              if [[ -n "${report_file}" ]]; then
+                local state result blocker channel package version
+                state="$(jq -r '.state // "publish_state_unknown"' "${report_file}")"
+                result="$(jq -r '.result // "unknown"' "${report_file}")"
+                blocker="$(jq -r '.blocker // ""' "${report_file}")"
+                channel="$(jq -r '.channel // "unknown"' "${report_file}")"
+                package="$(jq -r '.package // ""' "${report_file}")"
+                version="$(jq -r '.version // ""' "${report_file}")"
+                publish_state="${state}"
+                if [[ "${state}" == "published" && "${result}" == "fresh_publish_success" ]]; then
+                  final_state="release_publish_complete"
+                elif [[ "${state}" == "already_published" && "${result}" == "idempotent_noop" ]]; then
+                  final_state="release_publish_idempotent_noop"
+                elif [[ "${result}" == "external_blocker" || -n "${blocker}" ]]; then
+                  final_state="publish_external_blocker"
+                elif [[ "${state}" == "awaiting_environment_approval" ]]; then
+                  final_state="awaiting_environment_approval"
+                else
+                  final_state="publish_state_unknown"
+                  publish_state="publish_state_unknown"
+                fi
+                record "publish_report" "parsed" "channel=${channel} state=${state} result=${result} blocker=${blocker} package=${package} version=${version}"
+                return 0
+              fi
+            fi
+            final_state="publish_state_unknown"
+            publish_state="publish_state_unknown"
+            record "publish_report" "missing" "No publish-report artifact found for run_id=${run_id}; workflow success is not treated as fresh publish."
+          }
+
           record() {
             jq -n --arg name "$1" --arg status "$2" --arg details "$3" \
               '{name:$name,status:$status,details:$details}' >> "${STEPS}"
@@ -568,9 +606,8 @@ jobs:
                   set -e
                   case "${publish_rc}" in
                     0)
-                      final_state="release_publish_complete"
-                      publish_state="published"
-                      record "publish_workflow" "success" "${publish_workflow} run_id=${publish_workflow_run_id}"
+                      classify_publish_report "${publish_workflow_run_id}"
+                      record "publish_workflow" "completed" "${publish_workflow} run_id=${publish_workflow_run_id}"
                       ;;
                     3)
                       final_state="awaiting_environment_approval"
