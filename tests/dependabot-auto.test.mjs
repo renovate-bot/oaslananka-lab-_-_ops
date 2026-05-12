@@ -29,6 +29,8 @@ test("labels conflict class with the human conflict resolution path in script", 
   const text = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../scripts/dependabot-auto.mjs", import.meta.url), "utf8"));
   assert.match(text, /needs-human-conflict-resolution/);
   assert.match(text, /source_dependabot_closed/);
+  assert.match(text, /ops-pr-finalize\.yml/);
+  assert.match(text, /finalize_dispatched/);
 });
 
 test("classifies required checks merge blockers", () => {

@@ -222,31 +222,44 @@ async function approveAndMerge(owner, full, pr) {
     event: "APPROVE",
     body: "Approved for policy-controlled Dependabot auto-merge.",
   }, true);
-  const merge = await api(owner, "PUT", `repos/${full}/pulls/${pr.number}/merge`, {
-    commit_title: pr.title,
-    merge_method: "squash",
-    sha: expectedSha,
-  }, true);
-  if (merge.ok) {
-    if (pr.headRefName && repoOwner === owner) {
-      await api(owner, "DELETE", `repos/${full}/git/refs/heads/${encodeURIComponent(pr.headRefName)}`, undefined, true);
-    }
-    return { reviewed: review.ok, merged: true, mode: "merged", mergeSha: merge.data?.sha ?? null };
+  try {
+    gh("oaslananka-lab", [
+      "workflow",
+      "run",
+      "ops-pr-finalize.yml",
+      "--repo",
+      OPS_REPO,
+      "--ref",
+      "main",
+      "-f",
+      `target_owner=${repoOwner}`,
+      "-f",
+      `target_repo=${repoName}`,
+      "-f",
+      `pr_number=${pr.number}`,
+      "-f",
+      "requested_action=finalize",
+      "-f",
+      `expected_head_sha=${expectedSha}`,
+      "-f",
+      "dry_run=false",
+    ]);
+    return { reviewed: review.ok, merged: false, mode: "finalize_dispatched", expectedSha };
+  } catch (error) {
+    const mode = classifyMergeFailure(error.message);
+    const rebaseRequested = mode === "merge_conflict_rebase_requested" ? requestDependabotRebase(owner, full, pr.number) : false;
+    const conflictLabel =
+      mode === "merge_conflict_rebase_requested" ? addLabel(owner, full, pr.number, "needs-human-conflict-resolution") : false;
+    return {
+      reviewed: review.ok,
+      merged: false,
+      mode,
+      error: error.message,
+      rebaseRequested,
+      conflictLabel,
+      repository: `${repoOwner}/${repoName}`,
+    };
   }
-  const error = merge.data?.message || `GitHub merge API returned ${merge.status}`;
-  const mode = classifyMergeFailure(error);
-  const rebaseRequested = mode === "merge_conflict_rebase_requested" ? requestDependabotRebase(owner, full, pr.number) : false;
-  const conflictLabel =
-    mode === "merge_conflict_rebase_requested" ? addLabel(owner, full, pr.number, "needs-human-conflict-resolution") : false;
-  return {
-    reviewed: review.ok,
-    merged: false,
-    mode,
-    error,
-    rebaseRequested,
-    conflictLabel,
-    repository: `${repoOwner}/${repoName}`,
-  };
 }
 
 export async function processPullRequest(repoEntry, pr) {
