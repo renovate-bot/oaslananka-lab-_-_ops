@@ -58,6 +58,31 @@ function ghJson(owner, args, fallback) {
   }
 }
 
+async function api(owner, method, endpoint, body, allowFail = false) {
+  const token = tokenFor(owner);
+  if (!token) throw new Error(`Missing GitHub token for ${owner}`);
+  const response = await fetch(`https://api.github.com/${endpoint}`, {
+    method,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "oaslananka-repo-ops-dependabot-auto",
+      "X-GitHub-Api-Version": "2026-03-10",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok && !allowFail) {
+    const error = new Error(data?.message || `GitHub API ${method} ${endpoint} failed: ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return { ok: response.ok, status: response.status, data };
+}
+
 function policyRepos() {
   const repos = [];
   const base = path.join(ROOT, "config", "repos");
@@ -117,34 +142,56 @@ function dispatchFixLoop(full, number) {
   }
 }
 
-function approveAndMerge(owner, full, pr) {
+export function classifyMergeFailure(message = "") {
+  const lower = String(message).toLowerCase();
+  if (lower.includes("merge conflicts") || lower.includes("not mergeable")) return "merge_conflict_rebase_requested";
+  if (lower.includes("code owner review") || lower.includes("review required")) return "merge_blocked_codeowner_review";
+  if (lower.includes("required status checks") || lower.includes("expected")) return "merge_blocked_required_checks";
+  if (lower.includes("cannot be merged") || lower.includes("method not allowed")) return "merge_blocked_by_ruleset";
+  return "merge_failed";
+}
+
+function requestDependabotRebase(owner, full, number) {
+  try {
+    gh(owner, ["api", `repos/${full}/issues/${number}/comments`, "-f", "body=@dependabot rebase"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function approveAndMerge(owner, full, pr) {
   const expectedSha = pr.headRefOid;
-  const reviewed = spawnSync("gh", ["pr", "review", String(pr.number), "--repo", full, "--approve", "--body", "Approved for policy-controlled Dependabot auto-merge."], {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: { ...process.env, GH_TOKEN: tokenFor(owner) },
-  });
-  const mergeArgs = ["pr", "merge", String(pr.number), "--repo", full, "--squash", "--delete-branch", "--match-head-commit", expectedSha];
-  const merged = spawnSync("gh", mergeArgs, {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: { ...process.env, GH_TOKEN: tokenFor(owner) },
-  });
-  if (merged.status === 0) return { reviewed: reviewed.status === 0, merged: true, mode: "merged" };
-  const auto = spawnSync("gh", [...mergeArgs.slice(0, 5), "--auto", ...mergeArgs.slice(5)], {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: { ...process.env, GH_TOKEN: tokenFor(owner) },
-  });
+  const [repoOwner, repoName] = full.split("/");
+  const review = await api(owner, "POST", `repos/${full}/pulls/${pr.number}/reviews`, {
+    event: "APPROVE",
+    body: "Approved for policy-controlled Dependabot auto-merge.",
+  }, true);
+  const merge = await api(owner, "PUT", `repos/${full}/pulls/${pr.number}/merge`, {
+    commit_title: pr.title,
+    merge_method: "squash",
+    sha: expectedSha,
+  }, true);
+  if (merge.ok) {
+    if (pr.headRefName && repoOwner === owner) {
+      await api(owner, "DELETE", `repos/${full}/git/refs/heads/${encodeURIComponent(pr.headRefName)}`, undefined, true);
+    }
+    return { reviewed: review.ok, merged: true, mode: "merged", mergeSha: merge.data?.sha ?? null };
+  }
+  const error = merge.data?.message || `GitHub merge API returned ${merge.status}`;
+  const mode = classifyMergeFailure(error);
+  const rebaseRequested = mode === "merge_conflict_rebase_requested" ? requestDependabotRebase(owner, full, pr.number) : false;
   return {
-    reviewed: reviewed.status === 0,
-    merged: auto.status === 0,
-    mode: auto.status === 0 ? "auto_merge_enabled" : "merge_failed",
-    error: auto.stderr.trim() || merged.stderr.trim(),
+    reviewed: review.ok,
+    merged: false,
+    mode,
+    error,
+    rebaseRequested,
+    repository: `${repoOwner}/${repoName}`,
   };
 }
 
-export function processPullRequest(repoEntry, pr) {
+export async function processPullRequest(repoEntry, pr) {
   const classification = classifyUpdate(pr.title);
   if (classification === "major") {
     const labeled = addLabel(repoEntry.owner, repoEntry.full, pr.number, "dependabot-major-review-required");
@@ -161,8 +208,8 @@ export function processPullRequest(repoEntry, pr) {
   if (requireClean && checks.checks.length === 0) {
     return { pr: pr.number, action: "waiting_for_checks" };
   }
-  const merged = approveAndMerge(repoEntry.owner, repoEntry.full, pr);
-  return { pr: pr.number, action: merged.merged ? merged.mode : "merge_failed", ...merged };
+  const merged = await approveAndMerge(repoEntry.owner, repoEntry.full, pr);
+  return { pr: pr.number, action: merged.mode, ...merged };
 }
 
 function openDependabotPrs(repoEntry) {
@@ -195,7 +242,7 @@ export function summarizeAlerts(alerts) {
   return summary;
 }
 
-export function main() {
+export async function main() {
   const outDir = path.join(ROOT, "out");
   fs.mkdirSync(outDir, { recursive: true });
   const report = {
@@ -205,7 +252,10 @@ export function main() {
   for (const repoEntry of policyRepos()) {
     const alerts = dependabotAlerts(repoEntry);
     const prs = openDependabotPrs(repoEntry);
-    const processed = prs.map((pr) => processPullRequest(repoEntry, pr));
+    const processed = [];
+    for (const pr of prs) {
+      processed.push(await processPullRequest(repoEntry, pr));
+    }
     report.repos.push({
       repository: repoEntry.full,
       role: repoEntry.policy.repository_role?.role,
@@ -220,5 +270,8 @@ export function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  main();
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
 }
