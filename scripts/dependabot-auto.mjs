@@ -10,6 +10,17 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPS_REPO = process.env.OPS_REPO || "oaslananka-lab/_ops";
 const dispatchedFixLoops = new Set();
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function summarizeError(error) {
+  return {
+    message: String(error?.message || error || "unknown error"),
+    status: error?.status ?? null,
+  };
+}
+
 export function classifyUpdate(title = "") {
   const lower = title.toLowerCase();
   if (lower.includes("semver-major") || lower.includes("major")) return "major";
@@ -62,26 +73,45 @@ function ghJson(owner, args, fallback) {
 async function api(owner, method, endpoint, body, allowFail = false) {
   const token = tokenFor(owner);
   if (!token) throw new Error(`Missing GitHub token for ${owner}`);
-  const response = await fetch(`https://api.github.com/${endpoint}`, {
-    method,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": "oaslananka-repo-ops-dependabot-auto",
-      "X-GitHub-Api-Version": "2026-03-10",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok && !allowFail) {
-    const error = new Error(data?.message || `GitHub API ${method} ${endpoint} failed: ${response.status}`);
-    error.status = response.status;
-    error.data = data;
-    throw error;
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(`https://api.github.com/${endpoint}`, {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "User-Agent": "oaslananka-repo-ops-dependabot-auto",
+          "X-GitHub-Api-Version": "2026-03-10",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok && !allowFail) {
+        const error = new Error(data?.message || `GitHub API ${method} ${endpoint} failed: ${response.status}`);
+        error.status = response.status;
+        error.data = data;
+        throw error;
+      }
+      return { ok: response.ok, status: response.status, data };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await sleep(1000 * attempt);
+        continue;
+      }
+    }
   }
-  return { ok: response.ok, status: response.status, data };
+  if (allowFail) {
+    return {
+      ok: false,
+      status: lastError?.status ?? 0,
+      data: { message: lastError?.message || "fetch failed" },
+    };
+  }
+  throw lastError;
 }
 
 function policyRepos() {
@@ -248,16 +278,31 @@ export function summarizeAlerts(alerts) {
 export async function main() {
   const outDir = path.join(ROOT, "out");
   fs.mkdirSync(outDir, { recursive: true });
+  const file = path.join(outDir, "dependabot-auto.json");
   const report = {
     generated_at: new Date().toISOString(),
     repos: [],
   };
+  const writeReport = () => {
+    fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+  };
   for (const repoEntry of policyRepos()) {
-    const alerts = dependabotAlerts(repoEntry);
-    const prs = openDependabotPrs(repoEntry);
+    let alerts = [];
+    let prs = [];
+    let repositoryError = null;
+    try {
+      alerts = dependabotAlerts(repoEntry);
+      prs = openDependabotPrs(repoEntry);
+    } catch (error) {
+      repositoryError = summarizeError(error);
+    }
     const processed = [];
     for (const pr of prs) {
-      processed.push(await processPullRequest(repoEntry, pr));
+      try {
+        processed.push(await processPullRequest(repoEntry, pr));
+      } catch (error) {
+        processed.push({ pr: pr.number, action: "error", error: summarizeError(error) });
+      }
     }
     report.repos.push({
       repository: repoEntry.full,
@@ -265,10 +310,11 @@ export async function main() {
       open_dependabot_alerts: summarizeAlerts(alerts),
       open_dependabot_prs: prs.length,
       processed,
+      ...(repositoryError ? { error: repositoryError } : {}),
     });
+    writeReport();
   }
-  const file = path.join(outDir, "dependabot-auto.json");
-  fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+  writeReport();
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
