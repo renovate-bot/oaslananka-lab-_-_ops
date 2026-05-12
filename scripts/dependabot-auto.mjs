@@ -8,6 +8,7 @@ import { resolvePolicy } from "./ops-policy.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPS_REPO = process.env.OPS_REPO || "oaslananka-lab/_ops";
+const dispatchedFixLoops = new Set();
 
 export function classifyUpdate(title = "") {
   const lower = title.toLowerCase();
@@ -117,6 +118,7 @@ function addLabel(owner, full, number, label) {
 }
 
 function dispatchFixLoop(full, number) {
+  if (dispatchedFixLoops.has(full)) return false;
   const [owner, repo] = full.split("/");
   try {
     gh("oaslananka-lab", [
@@ -136,6 +138,7 @@ function dispatchFixLoop(full, number) {
       "-f",
       "max_iterations=10",
     ]);
+    dispatchedFixLoops.add(full);
     return true;
   } catch {
     return false;
