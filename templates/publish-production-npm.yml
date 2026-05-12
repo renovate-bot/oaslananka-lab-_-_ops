@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -50,6 +49,9 @@ jobs:
     timeout-minutes: 20
     needs: verify-package
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -74,7 +76,7 @@ jobs:
         run: |
           token="${NPM_TOKEN:-${NODE_AUTH_TOKEN:-}}"
           if [ -n "$token" ]; then
-            printf '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}\n' > ~/.npmrc
+            printf "//registry.npmjs.org/:_authToken=%s\n" "$token" > ~/.npmrc
             echo "NODE_AUTH_TOKEN=${token}" >> "$GITHUB_ENV"
           fi
       - name: Publish to npm

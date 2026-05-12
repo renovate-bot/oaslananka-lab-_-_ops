@@ -100,26 +100,53 @@ jobs:
           tag_name=""
           publish_state="publish_disabled"
 
+          gh_retry() {
+            local token="$1"
+            shift
+            local attempt=1
+            local max_attempts=6
+            local delay=30
+            local err="${RAW}/gh-retry-$RANDOM.err"
+
+            while true; do
+              if GH_TOKEN="${token}" gh "$@" 2> "${err}"; then
+                rm -f "${err}"
+                return 0
+              fi
+              local status="$?"
+              if grep -qi "API rate limit exceeded" "${err}" && [[ "${attempt}" -lt "${max_attempts}" ]]; then
+                echo "GitHub API rate limit hit; retrying in ${delay}s (attempt ${attempt}/${max_attempts})." >&2
+                sleep "${delay}"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+                continue
+              fi
+              cat "${err}" >&2
+              rm -f "${err}"
+              return "${status}"
+            done
+          }
+
           target_api() {
-            GH_TOKEN="${TARGET_TOKEN}" gh api \
+            gh_retry "${TARGET_TOKEN}" api \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: ${API_VERSION}" \
               "$@"
           }
 
           ops_api() {
-            GH_TOKEN="${OPS_TOKEN}" gh api \
+            gh_retry "${OPS_TOKEN}" api \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: ${API_VERSION}" \
               "$@"
           }
 
           ops_gh() {
-            GH_TOKEN="${OPS_TOKEN}" gh "$@"
+            gh_retry "${OPS_TOKEN}" "$@"
           }
 
           target_gh() {
-            GH_TOKEN="${TARGET_TOKEN}" gh "$@"
+            gh_retry "${TARGET_TOKEN}" "$@"
           }
 
           record() {
@@ -186,7 +213,10 @@ jobs:
             ops_api --method POST "repos/${OPS_REPO}/actions/workflows/${workflow}/dispatches" \
               --input "${body_file}" > "${response_file}"
             local run_id
-            run_id="$(jq -r '.workflow_run_id // .id // empty' "${response_file}")"
+            run_id=""
+            if [[ -s "${response_file}" ]]; then
+              run_id="$(jq -r '.workflow_run_id // .id // empty' "${response_file}" 2>/dev/null || true)"
+            fi
             if [[ -z "${run_id}" ]]; then
               sleep 8
               run_id="$(ops_gh run list --repo "${OPS_REPO}" --workflow "${workflow}" --limit 10 --json databaseId |
