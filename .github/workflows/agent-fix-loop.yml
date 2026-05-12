@@ -143,6 +143,13 @@ jobs:
             target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" --input "${body_file}" >/dev/null
           }
 
+          add_pr_label() {
+            local label="$1"
+            local label_file="${OUT}/label-$(date +%s%N).json"
+            jq -n --arg label "${label}" '{labels: [$label]}' > "${label_file}"
+            target_api --method POST "repos/${REPO}/issues/${PR_NUMBER}/labels" --input "${label_file}" >/dev/null || true
+          }
+
           normalize_max_iterations() {
             local value="$1"
             if [[ "${value}" =~ ^[0-9]+$ ]] && [[ "${value}" -ge 1 ]] && [[ "${value}" -le 10 ]]; then
@@ -721,6 +728,33 @@ jobs:
             [[ "${failing}" -eq 0 && "${pending}" -eq 0 && "${failed_runs}" -eq 0 && "${unresolved}" -eq 0 ]]
           }
 
+          is_dependabot_major_update() {
+            python - "${OUT}/pr-api.json" <<'PY'
+          import re
+          import sys
+          import json
+
+          pr = json.load(open(sys.argv[1], encoding="utf-8"))
+          login = ((pr.get("user") or {}).get("login") or "").lower()
+          if "dependabot" not in login:
+              raise SystemExit(1)
+
+          title = pr.get("title") or ""
+          lower = title.lower()
+          if "semver-major" in lower:
+              raise SystemExit(0)
+
+          versions = [
+              tuple(map(int, match.groups()))
+              for match in re.finditer(r"\b(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?\b", title)
+          ]
+          if len(versions) >= 2 and versions[1][0] > versions[0][0]:
+              raise SystemExit(0)
+
+          raise SystemExit(1)
+          PY
+          }
+
           is_worse_than_previous() {
             local failing="$1"
             local failed_runs="$2"
@@ -833,6 +867,11 @@ jobs:
                 post_comment_text "**Agent fix loop clean**\n\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Finalize: disabled by repository policy"
                 append_iteration_log "${iteration}" "${run_id}" "${classification}" "policy_disabled" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
                 final_state="policy_disabled"
+              elif is_dependabot_major_update && [[ "$(jq -r '.dependabot.allow_major_auto_merge // false' "${OUT}/policy.json")" != "true" ]]; then
+                add_pr_label "dependabot-major-review-required"
+                post_comment_text "**Agent fix loop clean but not finalized**\n\n- Classification: Dependabot major update\n- Diagnostics: https://github.com/${OPS_REPO}/actions/runs/${run_id}\n- Finalize: blocked by Dependabot major-update policy"
+                append_iteration_log "${iteration}" "${run_id}" "${classification}" "dependabot_major_review_required" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+                final_state="dependabot_major_review_required"
               elif [[ "$(jq -r '.pr.finalize' "${OUT}/policy.json")" == "true" ]]; then
                 finalize_body="${OUT}/finalize-dispatch-${iteration}.json"
                 finalize_response="${OUT}/finalize-dispatch-${iteration}-response.json"

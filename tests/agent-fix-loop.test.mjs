@@ -66,6 +66,18 @@ test("push and rollback paths are safe for local-only bot commits", () => {
   assert.match(workflow, /rollback skipped: commit \$\{commit_sha\} is not ancestor of remote HEAD/);
 });
 
+test("dependabot major updates are not auto-finalized by fix-loop", () => {
+  assert.match(workflow, /is_dependabot_major_update\(\)/);
+  assert.match(workflow, /dependabot-major-review-required/);
+  assert.match(workflow, /dependabot\.allow_major_auto_merge \/\/ false/);
+  assert.match(workflow, /dependabot_major_review_required/);
+  const majorPolicyIndex = workflow.indexOf("is_dependabot_major_update");
+  const finalizeIndex = workflow.indexOf("ops-pr-finalize.yml");
+  assert.ok(majorPolicyIndex > 0, "Dependabot major guard exists");
+  assert.ok(finalizeIndex > 0, "finalize dispatch exists");
+  assert.ok(majorPolicyIndex < finalizeIndex, "major guard is checked before finalize dispatch");
+});
+
 test("typescript baseUrl deprecation is classified before generic format lint", () => {
   const tsIndex = workflow.indexOf('echo "typescript baseUrl deprecation"');
   const formatIndex = workflow.indexOf('echo "format/lint"');
