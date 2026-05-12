@@ -40,6 +40,9 @@ test("publish and environment failures have patch paths", () => {
   assert.match(workflow, /scaffold_publish_workflow/);
   assert.match(workflow, /call_ensure_production_environment/);
   assert.match(workflow, /update_action_pins/);
+  assert.match(workflow, /patch_codecov_nonblocking/);
+  assert.match(workflow, /prettier --write --ignore-unknown \./);
+  assert.match(workflow, /resolve_unresolved_review_threads/);
   assert.match(workflow, /templates\/publish-production-mcp\.yml/);
   assert.match(workflow, /templates\/publish-production-npm\.yml/);
   assert.match(workflow, /templates\/deploy-pages\.yml/);

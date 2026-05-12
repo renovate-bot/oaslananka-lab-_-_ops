@@ -27,6 +27,7 @@ const requiredClassifications = [
   "github api rate limit",
   "direct write blocked by ruleset",
   "mirror sync conflict",
+  "codecov token required",
 ];
 
 test("agent fix-loop classifier names known rollout failure classes", () => {
