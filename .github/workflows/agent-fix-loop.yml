@@ -272,6 +272,8 @@ jobs:
               echo "action pin update"
             elif [[ -s "${combined}" ]] && grep -Eiq 'lockfile|frozen-lockfile|ERR_PNPM_OUTDATED_LOCKFILE|package-lock.json|pnpm-lock.yaml' "${combined}"; then
               echo "missing lockfile"
+            elif grep -R -Eiq 'React and React DOM majors|runtime/type skew|react-dom.*remain version|Mismatch detected across React runtime/type package majors|Operator mode|Search by name, skill, tag, or tenant' "${iteration_dir}"; then
+              echo "react runtime type skew"
             elif jq -e '.run_summary.failures > 0 or .check_summary.failing > 0' "${diagnostics_file}" >/dev/null; then
               echo "unknown"
             else
@@ -338,6 +340,9 @@ jobs:
                 ;;
               "missing lockfile")
                 printf '%s\n' "Regenerate the lockfile with the repository package manager and commit the manifest plus lockfile together."
+                ;;
+              "react runtime type skew")
+                printf '%s\n' "Align React runtime and type package majors in package.json files, regenerate the lockfile, and rerun UI smoke tests."
                 ;;
               "trailing whitespace")
                 printf '%s\n' "Strip trailing whitespace and normalize line endings, then push the same PR branch."
@@ -456,6 +461,62 @@ jobs:
           PY
           }
 
+          align_react_runtime_type_versions() {
+            local repo_dir="$1"
+            python - "${repo_dir}" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          skip_dirs = {".git", "node_modules", "dist", "coverage", ".next"}
+
+          def major(value):
+              if not isinstance(value, str):
+                  return None
+              match = re.search(r"(\d+)", value)
+              return int(match.group(1)) if match else None
+
+          changed = False
+          for path in root.rglob("package.json"):
+              if any(part in skip_dirs for part in path.parts):
+                  continue
+              data = json.loads(path.read_text(encoding="utf-8"))
+              deps = data.get("dependencies") or {}
+              dev_deps = data.get("devDependencies") or {}
+              react = deps.get("react")
+              react_dom = deps.get("react-dom")
+              react_types = dev_deps.get("@types/react")
+              react_dom_types = dev_deps.get("@types/react-dom")
+
+              file_changed = False
+              if react and react_dom and major(react) != major(react_dom):
+                  deps["react-dom"] = react
+                  file_changed = True
+              if react_types and react_dom_types and major(react_types) != major(react_dom_types):
+                  dev_deps["@types/react-dom"] = react_types
+                  file_changed = True
+
+              if file_changed:
+                  path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+                  changed = True
+
+          if not changed:
+              raise SystemExit(0)
+          PY
+            (
+              cd "${repo_dir}"
+              corepack enable || true
+              if [[ -f pnpm-lock.yaml ]]; then
+                corepack pnpm install --lockfile-only || true
+              elif [[ -f package-lock.json ]]; then
+                npm install --package-lock-only || true
+              fi
+            )
+            run_node_format_lint "${repo_dir}"
+          }
+
           resolve_unresolved_review_threads() {
             local iteration_dir="$1"
             local threads_file
@@ -536,6 +597,9 @@ jobs:
                 ;;
               "missing lockfile")
                 generate_lockfile_if_missing "${repo_dir}"
+                ;;
+              "react runtime type skew")
+                align_react_runtime_type_versions "${repo_dir}"
                 ;;
               "publish workflow discovery missing")
                 scaffold_publish_workflow "${repo_dir}"
