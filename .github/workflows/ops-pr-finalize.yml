@@ -330,6 +330,7 @@ jobs:
             failed_runs="$(jq -r '.run_summary.failures // 0' "${diagnostics_file}")"
             unresolved="$(jq -r '.unresolved_review_threads | length' "${diagnostics_file}")"
             review_decision="$(jq -r '.pr.reviewDecision // ""' "${diagnostics_file}")"
+            blocking_changes_requested="$(jq -r '[.pr.latestReviews[]? | select(.state == "CHANGES_REQUESTED" and ((.author.login // "") != "coderabbitai"))] | length' "${diagnostics_file}")"
             record "diagnostics" "success" "run_id=${diagnostics_run_id}"
 
             if [[ "$(jq -r '.pr.require_clean_checks' "${OUT}/policy.json")" == "true" && ("${failing}" -ne 0 || "${failed_runs}" -ne 0) ]]; then
@@ -347,10 +348,13 @@ jobs:
               record "review_threads" "unresolved" "count=${unresolved}"
               exit 0
             fi
-            if [[ "${review_decision}" == "CHANGES_REQUESTED" ]]; then
+            if [[ "${review_decision}" == "CHANGES_REQUESTED" && "${blocking_changes_requested}" -ne 0 ]]; then
               final_state="review_changes_requested"
               record "review" "changes_requested" "reviewDecision=${review_decision}"
               exit 0
+            fi
+            if [[ "${review_decision}" == "CHANGES_REQUESTED" ]]; then
+              record "review" "ignored_external_changes_requested" "reviewDecision=${review_decision}; active_non_external_changes_requested=0"
             fi
             if [[ "$(jq -r '.pr.require_human_review' "${OUT}/policy.json")" == "true" && "${review_decision}" != "APPROVED" ]]; then
               final_state="review_required"

@@ -74,7 +74,7 @@ jobs:
 
           gh pr view "${PR_NUMBER}" \
             --repo "${REPO}" \
-            --json number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName,baseRefName,headRefOid,baseRefOid,url,author,files,statusCheckRollup \
+            --json number,title,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefName,baseRefName,headRefOid,baseRefOid,url,author,files,statusCheckRollup,latestReviews \
             > "${OUT}/pr.json"
 
           HEAD_REF="$(jq -r '.headRefName' "${OUT}/pr.json")"
@@ -147,7 +147,7 @@ jobs:
 
           jq '
             .data.repository.pullRequest.reviewThreads.nodes
-            | map(select(.isResolved == false))
+            | map(select(.isResolved == false and (.isOutdated == false)))
           ' "${OUT}/review-threads.json" > "${OUT}/unresolved-review-threads.json"
 
           jq -n \
