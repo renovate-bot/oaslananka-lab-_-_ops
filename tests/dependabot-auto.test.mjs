@@ -31,6 +31,7 @@ test("labels conflict class with the human conflict resolution path in script", 
   assert.match(text, /source_dependabot_closed/);
   assert.match(text, /ops-pr-finalize\.yml/);
   assert.match(text, /finalize_dispatched/);
+  assert.match(text, /Managed by _ops dependency automation/);
 });
 
 test("classifies required checks merge blockers", () => {

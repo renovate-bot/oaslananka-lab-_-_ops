@@ -147,7 +147,22 @@ function addLabel(owner, full, number, label) {
     gh(owner, ["pr", "edit", String(number), "--repo", full, "--add-label", label]);
     return true;
   } catch {
-    return false;
+    try {
+      gh(owner, [
+        "api",
+        `repos/${full}/labels`,
+        "-f",
+        `name=${label}`,
+        "-f",
+        "color=ededed",
+        "-f",
+        "description=Managed by _ops dependency automation",
+      ]);
+      gh(owner, ["pr", "edit", String(number), "--repo", full, "--add-label", label]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
