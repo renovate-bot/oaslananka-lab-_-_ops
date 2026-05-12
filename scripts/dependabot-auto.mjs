@@ -9,6 +9,10 @@ import { resolvePolicy } from "./ops-policy.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPS_REPO = process.env.OPS_REPO || "oaslananka-lab/_ops";
 const dispatchedFixLoops = new Set();
+const SOURCE_DEPENDABOT_DISABLED_MARKER = "<!-- repo-ops-source-dependabot-disabled -->";
+const SOURCE_DEPENDABOT_DISABLED_BODY = `${SOURCE_DEPENDABOT_DISABLED_MARKER}
+
+Closing because dependency automation for this fleet is managed from the CI/CD mirror through _ops. Source-side Dependabot is disabled by policy to avoid source/mirror divergence.`;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -147,6 +151,23 @@ function addLabel(owner, full, number, label) {
   }
 }
 
+function issueComments(repoEntry, number) {
+  return ghJson(repoEntry.owner, ["api", `repos/${repoEntry.full}/issues/${number}/comments?per_page=100`], []);
+}
+
+function hasSourceDependabotCloseMarker(repoEntry, number) {
+  return issueComments(repoEntry, number).some((comment) => String(comment.body || "").includes(SOURCE_DEPENDABOT_DISABLED_MARKER));
+}
+
+export function shouldCloseSourceDependabotPr(repoEntry) {
+  return (
+    repoEntry.owner === "oaslananka" &&
+    repoEntry.policy.repository_role?.role === "canonical_source" &&
+    repoEntry.policy.dependabot?.managed !== false &&
+    repoEntry.policy.dependabot?.source_settings_disabled === true
+  );
+}
+
 function dispatchFixLoop(full, number) {
   const key = `${full}#${number}`;
   if (dispatchedFixLoops.has(key)) return false;
@@ -249,6 +270,25 @@ export async function processPullRequest(repoEntry, pr) {
   return { pr: pr.number, action: merged.mode, ...merged };
 }
 
+export async function closeSourceDependabotPr(repoEntry, pr) {
+  const commented = hasSourceDependabotCloseMarker(repoEntry, pr.number)
+    ? { ok: true, skipped: true }
+    : await api(repoEntry.owner, "POST", `repos/${repoEntry.full}/issues/${pr.number}/comments`, {
+        body: SOURCE_DEPENDABOT_DISABLED_BODY,
+      }, true);
+  const closed = await api(repoEntry.owner, "PATCH", `repos/${repoEntry.full}/pulls/${pr.number}`, {
+    state: "closed",
+  }, true);
+  return {
+    pr: pr.number,
+    action: closed.ok ? "source_dependabot_closed" : "source_dependabot_close_failed",
+    commented: commented.ok,
+    commentSkipped: commented.skipped === true,
+    closed: closed.ok,
+    error: closed.ok ? null : closed.data?.message || `GitHub API returned ${closed.status}`,
+  };
+}
+
 function openDependabotPrs(repoEntry) {
   return ghJson(repoEntry.owner, [
     "pr",
@@ -290,7 +330,7 @@ export async function main() {
   const writeReport = () => {
     fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
   };
-  for (const repoEntry of policyRepos().filter((entry) => entry.owner === "oaslananka-lab")) {
+  for (const repoEntry of policyRepos()) {
     let alerts = [];
     let prs = [];
     let repositoryError = null;
@@ -301,9 +341,23 @@ export async function main() {
       repositoryError = summarizeError(error);
     }
     const processed = [];
+    const sourceDisabled = shouldCloseSourceDependabotPr(repoEntry);
+    if (repoEntry.owner !== "oaslananka-lab" && !sourceDisabled) {
+      report.repos.push({
+        repository: repoEntry.full,
+        role: repoEntry.policy.repository_role?.role,
+        open_dependabot_alerts: summarizeAlerts(alerts),
+        open_dependabot_prs: prs.length,
+        processed,
+        action: "skipped_non_mirror",
+        ...(repositoryError ? { error: repositoryError } : {}),
+      });
+      writeReport();
+      continue;
+    }
     for (const pr of prs) {
       try {
-        processed.push(await processPullRequest(repoEntry, pr));
+        processed.push(sourceDisabled ? await closeSourceDependabotPr(repoEntry, pr) : await processPullRequest(repoEntry, pr));
       } catch (error) {
         processed.push({ pr: pr.number, action: "error", error: summarizeError(error) });
       }

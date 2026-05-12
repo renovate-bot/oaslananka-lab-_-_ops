@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyMergeFailure, classifyUpdate, summarizeAlerts } from "../scripts/dependabot-auto.mjs";
+import { classifyMergeFailure, classifyUpdate, shouldCloseSourceDependabotPr, summarizeAlerts } from "../scripts/dependabot-auto.mjs";
 
 test("classifies semver major update", () => {
   assert.equal(classifyUpdate("chore(deps): bump eslint from 9.39.4 to 10.3.0"), "major");
@@ -28,7 +28,7 @@ test("classifies merge conflicts as rebase-requestable", () => {
 test("labels conflict class with the human conflict resolution path in script", async () => {
   const text = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../scripts/dependabot-auto.mjs", import.meta.url), "utf8"));
   assert.match(text, /needs-human-conflict-resolution/);
-  assert.match(text, /entry\.owner === "oaslananka-lab"/);
+  assert.match(text, /source_dependabot_closed/);
 });
 
 test("classifies required checks merge blockers", () => {
@@ -36,4 +36,35 @@ test("classifies required checks merge blockers", () => {
     classifyMergeFailure("11 of 11 required status checks have not succeeded: 1 expected."),
     "merge_blocked_required_checks",
   );
+});
+
+test("source Dependabot PRs are closed only when source automation is disabled by policy", () => {
+  assert.equal(
+    shouldCloseSourceDependabotPr({
+      owner: "oaslananka",
+      policy: {
+        repository_role: { role: "canonical_source" },
+        dependabot: { managed: true, source_settings_disabled: true },
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    shouldCloseSourceDependabotPr({
+      owner: "oaslananka-lab",
+      policy: {
+        repository_role: { role: "ci_cd_mirror" },
+        dependabot: { managed: true, source_settings_disabled: true },
+      },
+    }),
+    false,
+  );
+});
+
+test("source Dependabot close path uses an idempotent marker comment", async () => {
+  const text = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../scripts/dependabot-auto.mjs", import.meta.url), "utf8"));
+  assert.match(text, /repo-ops-source-dependabot-disabled/);
+  assert.match(text, /hasSourceDependabotCloseMarker/);
+  assert.match(text, /repos\/\$\{repoEntry\.full\}\/pulls\/\$\{pr\.number\}/);
+  assert.match(text, /state: "closed"/);
 });
