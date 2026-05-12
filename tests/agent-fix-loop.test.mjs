@@ -37,6 +37,8 @@ test("unknown fallback still exists only after explicit rollout matchers", () =>
 });
 
 test("publish and environment failures have patch paths", () => {
+  assert.match(workflow, /Setup Node for target repository tooling/);
+  assert.match(workflow, /node-version: "24"/);
   assert.match(workflow, /scaffold_publish_workflow/);
   assert.match(workflow, /call_ensure_production_environment/);
   assert.match(workflow, /update_action_pins/);
