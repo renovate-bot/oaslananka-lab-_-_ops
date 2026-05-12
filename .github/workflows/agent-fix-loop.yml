@@ -54,7 +54,7 @@ jobs:
       - name: Setup Node for target repository tooling
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "24.15.0"
 
       - name: Create GitHub App token
         id: app
@@ -216,6 +216,8 @@ jobs:
               echo "review-thread patch"
             elif [[ -s "${combined}" ]] && grep -Eiq 'trailing[[:space:]-]+whitespace|trailing spaces|whitespace check failed|CRLF|line endings' "${combined}"; then
               echo "trailing whitespace"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'TS5101|Option .baseUrl. is deprecated|ignoreDeprecations.*6\.0|TypeScript 7\.0' "${combined}"; then
+              echo "typescript baseUrl deprecation"
             elif [[ -s "${combined}" ]] && grep -Eiq 'prettier|format:check|formatting|eslint|lint' "${combined}"; then
               echo "format/lint"
             elif [[ -s "${combined}" ]] && grep -Eiq 'codecov|Token required because branch is protected|Upload queued for processing failed' "${combined}"; then
@@ -343,6 +345,9 @@ jobs:
                 ;;
               "react runtime type skew")
                 printf '%s\n' "Align React runtime and type package majors in package.json files, regenerate the lockfile, and rerun UI smoke tests."
+                ;;
+              "typescript baseUrl deprecation")
+                printf '%s\n' "Add \"ignoreDeprecations\": \"6.0\" to tsconfig compilerOptions that still use baseUrl. Keep this as a minimal compatibility patch for the dependency PR."
                 ;;
               "trailing whitespace")
                 printf '%s\n' "Strip trailing whitespace and normalize line endings, then push the same PR branch."
@@ -517,6 +522,43 @@ jobs:
             run_node_format_lint "${repo_dir}"
           }
 
+          patch_typescript_baseurl_deprecation() {
+            local repo_dir="$1"
+            python - "${repo_dir}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          skip_dirs = {".git", "node_modules", "dist", "coverage", ".next"}
+          changed = False
+
+          for path in root.rglob("tsconfig*.json"):
+              if any(part in skip_dirs for part in path.parts):
+                  continue
+
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  continue
+
+              compiler = data.get("compilerOptions")
+              if not isinstance(compiler, dict):
+                  continue
+              if "baseUrl" not in compiler:
+                  continue
+              if compiler.get("ignoreDeprecations") == "6.0":
+                  continue
+
+              compiler["ignoreDeprecations"] = "6.0"
+              path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+              changed = True
+
+          if not changed:
+              raise SystemExit(0)
+          PY
+          }
+
           resolve_unresolved_review_threads() {
             local iteration_dir="$1"
             local threads_file
@@ -601,6 +643,10 @@ jobs:
               "react runtime type skew")
                 align_react_runtime_type_versions "${repo_dir}"
                 ;;
+              "typescript baseUrl deprecation")
+                patch_typescript_baseurl_deprecation "${repo_dir}"
+                run_node_format_lint "${repo_dir}"
+                ;;
               "publish workflow discovery missing")
                 scaffold_publish_workflow "${repo_dir}"
                 ;;
@@ -630,10 +676,13 @@ jobs:
               return 3
             fi
             git -C "${repo_dir}" add -A
-            git -C "${repo_dir}" -c commit.gpgsign=false commit --no-gpg-sign -m "fix: auto-patch ${classification} in ${head_ref}" >&2
+            HUSKY=0 git -C "${repo_dir}" -c commit.gpgsign=false commit --no-gpg-sign -m "fix: auto-patch ${classification} in ${head_ref}" >&2
             local commit_sha
             commit_sha="$(git -C "${repo_dir}" rev-parse HEAD)"
-            git -C "${repo_dir}" push origin "HEAD:${head_ref}" >&2
+            if ! HUSKY=0 git -C "${repo_dir}" push origin "HEAD:${head_ref}" >&2; then
+              printf 'PUSH_FAILED:%s\n' "${commit_sha}"
+              return 4
+            fi
             echo "${commit_sha}"
           }
 
@@ -641,9 +690,27 @@ jobs:
             local head_ref="$1"
             local commit_sha="$2"
             local dest="${WORK}/rollback"
+            if [[ -z "${commit_sha}" ]]; then
+              echo "rollback skipped: empty commit sha" >&2
+              return 0
+            fi
             clone_pr_branch "${head_ref}" "${dest}"
-            git -C "${dest}" revert --no-edit "${commit_sha}"
-            git -C "${dest}" push origin "HEAD:${head_ref}"
+            if ! git -C "${dest}" cat-file -e "${commit_sha}^{commit}" 2>/dev/null; then
+              echo "rollback skipped: commit ${commit_sha} is not present in remote branch clone" >&2
+              return 0
+            fi
+            if ! git -C "${dest}" merge-base --is-ancestor "${commit_sha}" HEAD; then
+              echo "rollback skipped: commit ${commit_sha} is not ancestor of remote HEAD" >&2
+              return 0
+            fi
+            if ! HUSKY=0 git -C "${dest}" revert --no-edit "${commit_sha}"; then
+              echo "rollback skipped: revert failed for ${commit_sha}" >&2
+              return 0
+            fi
+            if ! HUSKY=0 git -C "${dest}" push origin "HEAD:${head_ref}"; then
+              echo "rollback skipped: push failed for ${commit_sha}" >&2
+              return 0
+            fi
           }
 
           diagnostics_clean() {
@@ -849,10 +916,18 @@ jobs:
               append_iteration_log "${iteration}" "${run_id}" "${classification}" "no_diff" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
               final_state="no_diff"
               break
+            elif [[ "${commit_status}" -eq 4 ]]; then
+              local_commit_sha="${commit_sha#PUSH_FAILED:}"
+              post_comment_text "Agent fix loop stopped: push failed after local-only auto-patch commit ${local_commit_sha}. No rollback was attempted because the commit was not confirmed remote-visible. Classification: ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "push_failed_with_no_rollback" "${local_commit_sha}" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              last_auto_commit=""
+              final_state="push_failed_with_no_rollback"
+              break
             elif [[ "${commit_status}" -ne 0 ]]; then
-              post_comment_text "Agent fix loop stopped: push or commit failed for classification ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
-              append_iteration_log "${iteration}" "${run_id}" "${classification}" "push_failed" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
-              final_state="push_failed"
+              post_comment_text "Agent fix loop stopped: commit failed for classification ${classification}. Diagnostics run: https://github.com/${OPS_REPO}/actions/runs/${run_id}"
+              append_iteration_log "${iteration}" "${run_id}" "${classification}" "commit_failed" "" "${failing}" "${pending}" "${failed_runs}" "${unresolved}"
+              last_auto_commit=""
+              final_state="commit_failed"
               break
             fi
 

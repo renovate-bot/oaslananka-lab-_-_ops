@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const workflow = readFileSync(new URL("../.github/workflows/agent-fix-loop.yml", import.meta.url), "utf8");
@@ -38,7 +42,7 @@ test("unknown fallback still exists only after explicit rollout matchers", () =>
 
 test("publish and environment failures have patch paths", () => {
   assert.match(workflow, /Setup Node for target repository tooling/);
-  assert.match(workflow, /node-version: "24"/);
+  assert.match(workflow, /node-version: "24\.15\.0"/);
   assert.match(workflow, /scaffold_publish_workflow/);
   assert.match(workflow, /call_ensure_production_environment/);
   assert.match(workflow, /update_action_pins/);
@@ -48,4 +52,65 @@ test("publish and environment failures have patch paths", () => {
   assert.match(workflow, /templates\/publish-production-mcp\.yml/);
   assert.match(workflow, /templates\/publish-production-npm\.yml/);
   assert.match(workflow, /templates\/deploy-pages\.yml/);
+});
+
+test("push and rollback paths are safe for local-only bot commits", () => {
+  assert.match(workflow, /HUSKY=0 git -C "\$\{repo_dir\}".*commit --no-gpg-sign/s);
+  assert.match(workflow, /HUSKY=0 git -C "\$\{repo_dir\}" push origin "HEAD:\$\{head_ref\}"/);
+  assert.match(workflow, /PUSH_FAILED:\%s/);
+  assert.match(workflow, /push_failed_with_no_rollback/);
+  assert.match(workflow, /last_auto_commit=""/);
+  assert.match(workflow, /cat-file -e "\$\{commit_sha\}\^\{commit\}"/);
+  assert.match(workflow, /merge-base --is-ancestor "\$\{commit_sha\}" HEAD/);
+  assert.match(workflow, /rollback skipped: commit \$\{commit_sha\} is not present in remote branch clone/);
+  assert.match(workflow, /rollback skipped: commit \$\{commit_sha\} is not ancestor of remote HEAD/);
+});
+
+test("typescript baseUrl deprecation is classified before generic format lint", () => {
+  const tsIndex = workflow.indexOf('echo "typescript baseUrl deprecation"');
+  const formatIndex = workflow.indexOf('echo "format/lint"');
+  assert.ok(tsIndex > 0, "TypeScript baseUrl classifier exists");
+  assert.ok(formatIndex > 0, "format/lint classifier exists");
+  assert.ok(tsIndex < formatIndex, "TS5101 is classified before generic lint/format");
+  assert.match(workflow, /TS5101\|Option \.baseUrl\. is deprecated\|ignoreDeprecations\.\*6\\\.0\|TypeScript 7\\\.0/);
+  assert.match(workflow, /"typescript baseUrl deprecation"\)/);
+  assert.match(workflow, /patch_typescript_baseurl_deprecation/);
+});
+
+test("typescript baseUrl patch adds ignoreDeprecations only where needed and is idempotent", async () => {
+  const match = workflow.match(/patch_typescript_baseurl_deprecation\(\) \{[\s\S]*?python - "\$\{repo_dir\}" <<'PY'\n([\s\S]*?)\n\s*PY\n\s*\}/);
+  assert.ok(match, "embedded TypeScript patch script is present");
+  const script = match[1].replace(/^ {10}/gm, "");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-fix-loop-ts5101-"));
+  try {
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      `${JSON.stringify({ compilerOptions: { baseUrl: "." } }, null, 2)}\n`,
+    );
+    writeFileSync(
+      join(dir, "tsconfig.lib.json"),
+      `${JSON.stringify({ compilerOptions: { strict: true } }, null, 2)}\n`,
+    );
+    writeFileSync(
+      join(dir, "tsconfig.done.json"),
+      `${JSON.stringify({ compilerOptions: { baseUrl: ".", ignoreDeprecations: "6.0" } }, null, 2)}\n`,
+    );
+
+    const first = spawnSync("python", ["-", dir], { input: script, encoding: "utf8" });
+    assert.equal(first.status, 0, first.stderr);
+    const patched = JSON.parse(readFileSync(join(dir, "tsconfig.json"), "utf8"));
+    const untouched = JSON.parse(readFileSync(join(dir, "tsconfig.lib.json"), "utf8"));
+    const alreadyDone = JSON.parse(readFileSync(join(dir, "tsconfig.done.json"), "utf8"));
+    assert.equal(patched.compilerOptions.ignoreDeprecations, "6.0");
+    assert.equal(untouched.compilerOptions.ignoreDeprecations, undefined);
+    assert.equal(alreadyDone.compilerOptions.ignoreDeprecations, "6.0");
+
+    const snapshot = readFileSync(join(dir, "tsconfig.json"), "utf8");
+    const second = spawnSync("python", ["-", dir], { input: script, encoding: "utf8" });
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(readFileSync(join(dir, "tsconfig.json"), "utf8"), snapshot);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
