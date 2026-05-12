@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyMergeFailure, classifyUpdate, shouldCloseSourceDependabotPr, summarizeAlerts } from "../scripts/dependabot-auto.mjs";
+import { classifyMergeFailure, classifyUpdate, processPullRequest, shouldCloseSourceDependabotPr, summarizeAlerts } from "../scripts/dependabot-auto.mjs";
 
 test("classifies semver major update", () => {
   assert.equal(classifyUpdate("chore(deps): bump eslint from 9.39.4 to 10.3.0"), "major");
@@ -70,4 +70,21 @@ test("source Dependabot close path uses an idempotent marker comment", async () 
   assert.match(text, /hasSourceDependabotCloseMarker/);
   assert.match(text, /repos\/\$\{repoEntry\.full\}\/pulls\/\$\{pr\.number\}/);
   assert.match(text, /state: "closed"/);
+});
+
+test("conflicting patch/minor Dependabot PRs are labeled before fix-loop", async () => {
+  const result = await processPullRequest(
+    {
+      owner: "missing-owner-for-test",
+      full: "missing-owner-for-test/repo",
+      policy: { pr: { require_clean_checks: true } },
+    },
+    {
+      number: 9,
+      title: "chore(deps): bump urllib3 from 2.6.3 to 2.7.0",
+      mergeable: "CONFLICTING",
+      mergeStateStatus: "DIRTY",
+    },
+  );
+  assert.equal(result.action, "needs_human_conflict_resolution");
 });

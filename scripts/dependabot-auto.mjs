@@ -283,6 +283,17 @@ export async function processPullRequest(repoEntry, pr) {
     const labeled = addLabel(repoEntry.owner, repoEntry.full, pr.number, "dependabot-major-review-required");
     return { pr: pr.number, action: "major_review_required", labeled };
   }
+  if (
+    String(pr.mergeable || "").toUpperCase() === "CONFLICTING" ||
+    String(pr.mergeStateStatus || "").toUpperCase() === "DIRTY"
+  ) {
+    return {
+      pr: pr.number,
+      action: "needs_human_conflict_resolution",
+      rebaseRequested: requestDependabotRebase(repoEntry.owner, repoEntry.full, pr.number),
+      labeled: addLabel(repoEntry.owner, repoEntry.full, pr.number, "needs-human-conflict-resolution"),
+    };
+  }
   const checks = prChecks(repoEntry.owner, repoEntry.full, pr.number);
   if (checks.pending.length > 0) {
     return { pr: pr.number, action: "pending_checks", pending: checks.pending.length };
@@ -328,7 +339,7 @@ function openDependabotPrs(repoEntry) {
     "--author",
     "app/dependabot",
     "--json",
-    "number,title,headRefName,headRefOid,mergeable,reviewDecision,url",
+    "number,title,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,url",
     "--limit",
     "100",
   ], []);
