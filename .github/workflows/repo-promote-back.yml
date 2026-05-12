@@ -287,9 +287,15 @@ jobs:
           git diff --binary HEAD "refs/remotes/mirror/promote" -- . > "${OUT}/branch-to-mirror.diff" || true
           if [[ -s "${OUT}/branch-to-mirror.diff" ]]; then
             if ! git apply --index "${OUT}/branch-to-mirror.diff"; then
-              final_state="promote_failed"
-              record "diff" "apply_failed" "manual conflict resolution required"
-              exit 0
+              record "diff" "apply_failed" "patch apply failed; resetting promote branch tree to validated mirror tree"
+              git reset --hard "refs/remotes/origin/${SOURCE_BASE_BRANCH}" >/dev/null
+              git read-tree --reset -u "refs/remotes/mirror/promote"
+              if git diff --cached --quiet; then
+                final_state="no_diff"
+                record "diff" "tree_reset_no_diff" "mirror tree produced no staged source change"
+                exit 0
+              fi
+              record "diff" "tree_reset_applied" "promote branch now stages validated mirror tree"
             fi
             if [[ -z "$(git status --porcelain)" ]]; then
               final_state="no_diff"
