@@ -213,9 +213,9 @@ jobs:
               "${target_sha_before:-none}")"
 
             if [[ -n "${target_sha_before}" ]]; then
-              git checkout -B "${branch}" "refs/remotes/target/${default_branch}"
+              git checkout -f -B "${branch}" "refs/remotes/target/${default_branch}"
             else
-              git checkout -B "${branch}" "${source_sha}"
+              git checkout -f -B "${branch}" "${source_sha}"
             fi
 
             git read-tree --reset -u "${source_sha}"
