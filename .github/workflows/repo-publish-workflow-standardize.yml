@@ -1,0 +1,113 @@
+name: Repo Publish Workflow Standardize
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: Managed repository name
+        required: true
+        type: string
+      apply:
+        description: Create or update the source PR
+        required: true
+        default: false
+        type: boolean
+      approval:
+        description: Required when apply=true. Must equal APPLY_PUBLISH_STANDARD.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-publish-workflow-standardize-${{ inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  standardize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Resolve policy target
+        id: policy
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+        run: |
+          set -euo pipefail
+          node scripts/ops-policy.mjs get --owner oaslananka-lab --repo "${TARGET_REPO}" > policy.json
+          jq -r '"source_owner=\(.mirror.source_owner)\nsource_repo=\(.mirror.source_repo)\nmirror_owner=\(.mirror.mirror_owner)\nmirror_repo=\(.mirror.mirror_repo)"' policy.json >> "${GITHUB_OUTPUT}"
+
+      - id: source_app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3
+        with:
+          client-id: ${{ vars.REPO_OPS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REPO_OPS_APP_PRIVATE_KEY }}
+          owner: ${{ steps.policy.outputs.source_owner }}
+          repositories: ${{ steps.policy.outputs.source_repo }}
+
+      - name: Render publish workflow standards into source PR branch
+        env:
+          APPLY: ${{ inputs.apply }}
+          APPROVAL: ${{ inputs.approval }}
+          GH_TOKEN: ${{ steps.source_app.outputs.token }}
+          SOURCE_OWNER: ${{ steps.policy.outputs.source_owner }}
+          SOURCE_REPO: ${{ steps.policy.outputs.source_repo }}
+          MIRROR_OWNER: ${{ steps.policy.outputs.mirror_owner }}
+          MIRROR_REPO: ${{ steps.policy.outputs.mirror_repo }}
+        run: |
+          set -euo pipefail
+          if [[ "${APPLY}" == "true" && "${APPROVAL}" != "APPLY_PUBLISH_STANDARD" ]]; then
+            echo "approval must equal APPLY_PUBLISH_STANDARD when apply=true" >&2
+            exit 1
+          fi
+
+          work="${RUNNER_TEMP}/repo"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${SOURCE_OWNER}/${SOURCE_REPO}.git" "${work}"
+          git -C "${work}" config user.name "oaslananka-repo-ops[bot]"
+          git -C "${work}" config user.email "oaslananka-repo-ops[bot]@users.noreply.github.com"
+
+          branch="oaslananka/standardize-publish-workflows"
+          git -C "${work}" checkout -B "${branch}" "origin/main"
+
+          node scripts/render-publish-workflows.mjs \
+            --policy-owner oaslananka-lab \
+            --policy-repo "${MIRROR_REPO}" \
+            --target-dir "${work}" \
+            --target-repository "${MIRROR_OWNER}/${MIRROR_REPO}" | tee render-report.json
+
+          if [[ -z "$(git -C "${work}" status --porcelain)" ]]; then
+            echo "No publish workflow standardization changes."
+            exit 0
+          fi
+
+          git -C "${work}" status --short
+          if [[ "${APPLY}" != "true" ]]; then
+            echo "Dry run only; no branch or PR created."
+            exit 0
+          fi
+
+          git -C "${work}" add -A
+          HUSKY=0 git -C "${work}" -c commit.gpgsign=false commit --no-gpg-sign -m "ci(publish): standardize production publishing"
+          HUSKY=0 git -C "${work}" push --force-with-lease origin "HEAD:${branch}"
+
+          existing="$(gh pr list --repo "${SOURCE_OWNER}/${SOURCE_REPO}" --head "${branch}" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "${existing}" ]]; then
+            gh pr edit "${existing}" \
+              --repo "${SOURCE_OWNER}/${SOURCE_REPO}" \
+              --title "ci(publish): standardize production publishing" \
+              --body "Standardizes production publish workflows from _ops templates. The workflow guard targets ${MIRROR_OWNER}/${MIRROR_REPO}; source Actions remain inert by policy."
+            echo "Updated PR #${existing}"
+          else
+            gh pr create \
+              --repo "${SOURCE_OWNER}/${SOURCE_REPO}" \
+              --base main \
+              --head "${branch}" \
+              --title "ci(publish): standardize production publishing" \
+              --body "Standardizes production publish workflows from _ops templates. The workflow guard targets ${MIRROR_OWNER}/${MIRROR_REPO}; source Actions remain inert by policy."
+          fi

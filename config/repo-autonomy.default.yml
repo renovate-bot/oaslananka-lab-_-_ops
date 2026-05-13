@@ -45,6 +45,7 @@ release:
 publish:
   enabled: false
   npm: false
+  pypi: false
   ghcr: false
   dockerhub: false
   vscode_marketplace: false

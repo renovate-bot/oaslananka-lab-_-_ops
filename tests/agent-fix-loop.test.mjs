@@ -52,6 +52,7 @@ test("publish and environment failures have patch paths", () => {
   assert.match(workflow, /resolve_unresolved_review_threads/);
   assert.match(workflow, /templates\/publish-production-mcp\.yml/);
   assert.match(workflow, /templates\/publish-production-npm\.yml/);
+  assert.match(workflow, /templates\/publish-production-pypi\.yml/);
   assert.match(workflow, /templates\/deploy-pages\.yml/);
 });
 

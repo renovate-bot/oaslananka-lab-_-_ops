@@ -613,6 +613,9 @@ jobs:
             elif [[ "$(jq -r '.publish.npm // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
               render_template "${GITHUB_WORKSPACE}/templates/publish-production-npm.yml" "${publish_dir}/publish-production.yml"
             fi
+            if [[ "$(jq -r '.publish.pypi // false' "${OUT}/policy.json")" == "true" && ! -f "${publish_dir}/publish-production.yml" ]]; then
+              render_template "${GITHUB_WORKSPACE}/templates/publish-production-pypi.yml" "${publish_dir}/publish-production.yml"
+            fi
             if { [[ "$(jq -r '.publish.vscode_marketplace // false' "${OUT}/policy.json")" == "true" ]] || [[ "$(jq -r '.publish.open_vsx // false' "${OUT}/policy.json")" == "true" ]]; } && [[ ! -f "${publish_dir}/publish-production.yml" ]]; then
               render_template "${GITHUB_WORKSPACE}/templates/publish-production-vsce.yml" "${publish_dir}/publish-production.yml"
             fi

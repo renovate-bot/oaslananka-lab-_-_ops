@@ -12,6 +12,8 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.15.0"
+  NPM_VERSION: "11.6.2"
 
 defaults:
   run:
@@ -63,18 +65,27 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false
       - name: Install and verify package
         run: |
           set -euo pipefail
-          npm ci
-          npm rebuild better-sqlite3 --if-present
-          npm run build --if-present
-          npm run prepublishOnly --if-present
+          npm install -g "npm@${NPM_VERSION}"
           mkdir -p publish-artifact
-          npm pack --pack-destination publish-artifact
+          if [[ -f pnpm-lock.yaml ]]; then
+            corepack enable
+            corepack install || true
+            corepack pnpm install --frozen-lockfile
+            corepack pnpm run build --if-present
+            corepack pnpm run prepublishOnly --if-present
+            corepack pnpm pack --pack-destination publish-artifact
+          else
+            if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then npm ci; else npm install; fi
+            npm rebuild better-sqlite3 --if-present
+            npm run build --if-present
+            npm run prepublishOnly --if-present
+            npm pack --pack-destination publish-artifact
+          fi
           node --input-type=commonjs -e "const p=require('./package.json'); if (!p.name || !p.version) throw new Error('package.json name/version is required'); console.log(p.name + '@' + p.version);"
       - name: Upload package artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -101,11 +112,10 @@ jobs:
       - name: Setup Node.js for npm publish
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
-          package-manager-cache: false
       - name: Use npm for trusted publishing
-        run: npm install -g npm@11.6.2
+        run: npm install -g "npm@${NPM_VERSION}"
       - name: Publish to npm
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -20,11 +20,23 @@ test("required secrets includes dockerhub but not ghcr, pages, or MCP registry O
   const names = requiredSecretNames({
     publish: {
       npm: true,
+      pypi: true,
       ghcr: true,
       dockerhub: true,
       github_pages: true,
       mcp_registry: true,
+      trusted_publishing_only: true,
     },
   });
   assert.deepEqual(names, ["DOCKERHUB_TOKEN", "DOCKERHUB_USERNAME", "NODE_AUTH_TOKEN", "NPM_TOKEN"]);
+});
+
+test("PyPI fallback secret is required only when trusted publishing only is disabled", () => {
+  const names = requiredSecretNames({
+    publish: {
+      pypi: true,
+      trusted_publishing_only: false,
+    },
+  });
+  assert.deepEqual(names, ["PYPI_API_TOKEN"]);
 });

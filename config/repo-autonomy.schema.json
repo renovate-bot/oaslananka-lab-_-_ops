@@ -75,6 +75,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "npm": { "type": "boolean" },
+        "pypi": { "type": "boolean" },
         "ghcr": { "type": "boolean" },
         "dockerhub": { "type": "boolean" },
         "vscode_marketplace": { "type": "boolean" },

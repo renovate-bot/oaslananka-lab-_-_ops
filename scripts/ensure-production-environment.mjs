@@ -49,6 +49,9 @@ export function requiredSecretNames(policy) {
     names.add("NPM_TOKEN");
     names.add("NODE_AUTH_TOKEN");
   }
+  if (policy.publish?.pypi && !policy.publish?.trusted_publishing_only) {
+    names.add("PYPI_API_TOKEN");
+  }
   if (policy.publish?.vscode_marketplace) {
     names.add("VSCE_PAT");
     names.add("VS_MARKETPLACE_TOKEN");
