@@ -242,7 +242,41 @@ jobs:
 
           wait_ops_run() {
             local run_id="$1"
-            ops_gh run watch "${run_id}" --repo "${OPS_REPO}" --exit-status
+            local timeout_seconds="${OPS_WAIT_TIMEOUT_SECONDS:-1800}"
+            local interval_seconds="${OPS_WAIT_INTERVAL_SECONDS:-20}"
+            local elapsed=0
+            local status=""
+            local conclusion=""
+            local url=""
+
+            while [[ "${elapsed}" -le "${timeout_seconds}" ]]; do
+              ops_gh run view "${run_id}" --repo "${OPS_REPO}" --json status,conclusion,url > "${RAW}/run-${run_id}.json"
+              status="$(jq -r '.status // ""' "${RAW}/run-${run_id}.json")"
+              conclusion="$(jq -r '.conclusion // ""' "${RAW}/run-${run_id}.json")"
+              url="$(jq -r '.url // ""' "${RAW}/run-${run_id}.json")"
+
+              case "${status}" in
+                completed)
+                  if [[ "${conclusion}" == "success" ]]; then
+                    return 0
+                  fi
+                  echo "Workflow run ${run_id} completed with conclusion=${conclusion} url=${url}" >&2
+                  return 1
+                  ;;
+                queued|in_progress|waiting|requested|"")
+                  sleep "${interval_seconds}"
+                  elapsed=$((elapsed + interval_seconds))
+                  ;;
+                *)
+                  echo "Workflow run ${run_id} has unexpected status=${status} conclusion=${conclusion} url=${url}" >&2
+                  sleep "${interval_seconds}"
+                  elapsed=$((elapsed + interval_seconds))
+                  ;;
+              esac
+            done
+
+            echo "Workflow run ${run_id} did not complete within ${timeout_seconds}s" >&2
+            return 124
           }
 
           node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
