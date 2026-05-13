@@ -37,10 +37,14 @@ function parseArgs(argv) {
   return args;
 }
 
-function readTemplate(name, targetRepository) {
-  return fs
+function readTemplate(name, targetRepository, extraReplacements = {}) {
+  let content = fs
     .readFileSync(path.join(ROOT, "templates", name), "utf8")
     .replaceAll("__TARGET_REPOSITORY__", targetRepository);
+  for (const [key, value] of Object.entries(extraReplacements)) {
+    content = content.replaceAll(key, value);
+  }
+  return content;
 }
 
 function pnpmOnlyWorkflow(content) {
@@ -91,17 +95,20 @@ function packageMetadata(targetDir) {
 }
 
 function standardizeMcpMetadata(targetDir, policy) {
-  const serverJson = path.join(targetDir, "server.json");
+  const mcpSubdir = policy.publish?.mcp_directory || "";
+  const mcpDir = mcpSubdir ? path.join(targetDir, mcpSubdir) : targetDir;
+  const serverJson = path.join(mcpDir, "server.json");
   if (!fs.existsSync(serverJson)) return false;
   const metadata = JSON.parse(fs.readFileSync(serverJson, "utf8"));
-  const pkg = packageMetadata(targetDir);
+  const pkg = packageMetadata(mcpDir);
   const sourceOwner = policy.mirror?.source_owner || policy.repository_role?.source_of_truth_owner;
   const sourceRepo = policy.mirror?.source_repo || policy.mirror?.mirror_repo;
   const mirrorOwner = policy.mirror?.mirror_owner || policy.repository_role?.execution_owner;
   const mirrorRepo = policy.mirror?.mirror_repo || sourceRepo;
   if (!sourceOwner || !sourceRepo || !mirrorOwner || !mirrorRepo) return false;
 
-  metadata.name = `io.github.${sourceOwner}/${sourceRepo}`;
+  const registryName = mcpSubdir ? `io.github.${sourceOwner}/${mcpSubdir}` : `io.github.${sourceOwner}/${sourceRepo}`;
+  metadata.name = registryName;
   metadata.repository = {
     url: `https://github.com/${mirrorOwner}/${mirrorRepo}`,
     source: "github",
@@ -133,6 +140,8 @@ export function renderPublishWorkflows(args) {
     publishTemplate = "publish-production-mcp.yml";
   } else if (policy.publish?.npm) {
     publishTemplate = "publish-production-npm.yml";
+  } else if (policy.publish?.pypi && (policy.publish?.vscode_marketplace || policy.publish?.open_vsx)) {
+    publishTemplate = "publish-production-pypi-vsce.yml";
   } else if (policy.publish?.pypi) {
     publishTemplate = "publish-production-pypi.yml";
   } else if (policy.publish?.vscode_marketplace || policy.publish?.open_vsx) {
@@ -149,21 +158,28 @@ export function renderPublishWorkflows(args) {
 
   if (publishTemplate) {
     const file = path.join(workflowDir, publishTemplate === "deploy-pages.yml" ? "deploy-pages.yml" : "publish-production.yml");
-    const rendered = applyTransforms(readTemplate(publishTemplate, targetRepository));
+    const pypiDir = policy.publish?.pypi_directory || "";
+    const vsceDir = policy.publish?.vscode_directory || "";
+    const extraReplacements = {};
+    if (pypiDir) extraReplacements["__PYPI_DIRECTORY__"] = pypiDir;
+    if (vsceDir) extraReplacements["__VSCODE_DIRECTORY__"] = vsceDir;
+    const rendered = applyTransforms(readTemplate(publishTemplate, targetRepository, extraReplacements));
     if (writeIfChanged(file, rendered)) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
   }
 
-  if (policy.publish?.mcp_registry) {
+  const mcpInPublishTemplate = publishTemplate === "publish-production-pypi-vsce.yml";
+  if (policy.publish?.mcp_registry && !mcpInPublishTemplate) {
     const file = path.join(workflowDir, "mcp-registry.yml");
     const rendered = applyTransforms(readTemplate("mcp-registry.yml", targetRepository));
     if (writeIfChanged(file, rendered)) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
-    if (args.standardizeMcpMetadata && standardizeMcpMetadata(targetDir, policy)) {
-      changes.push("server.json");
-    }
+  }
+  if (policy.publish?.mcp_registry && args.standardizeMcpMetadata && standardizeMcpMetadata(targetDir, policy)) {
+    const mcpSubdir = policy.publish?.mcp_directory || "";
+    changes.push(mcpSubdir ? `${mcpSubdir}/server.json` : "server.json");
   }
 
   return { changes, policy, targetRepository };

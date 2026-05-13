@@ -41,8 +41,14 @@ release:
   require_release_plan_clean: true
 
 publish:
-  enabled: false
-  no_publish_target_detected: true
+  enabled: true
+  pypi: true
+  pypi_directory: fovux-mcp
+  mcp_registry: true
+  mcp_directory: fovux-mcp
+  vscode_marketplace: true
+  open_vsx: true
+  vscode_directory: fovux-studio
 
 dependabot:
   uv: true
