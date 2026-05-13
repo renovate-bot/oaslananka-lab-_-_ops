@@ -90,10 +90,16 @@ Only one VS Code Marketplace token and one Open VSX token are required.
 
 MCP registry publishing uses GitHub OIDC via `mcp-publisher login github-oidc`.
 
-The standard registry identity is tied to the execution mirror owner:
+The standard server identity stays tied to the canonical source owner:
 
 ```text
-io.github.oaslananka-lab/<repo>
+io.github.oaslananka/<repo>
 ```
 
-This matches the GitHub Actions identity used by `oaslananka-lab/*` workflows. If a server must publish as `io.github.oaslananka/<repo>`, the MCP Registry side must grant that namespace to the publishing identity.
+The `server.json` repository URL points at the execution mirror:
+
+```text
+https://github.com/oaslananka-lab/<repo>
+```
+
+This matches the repository metadata validators in the MCP repos while keeping the registry name stable on the canonical namespace. If MCP Registry OIDC later requires a different namespace binding, that is an external registry configuration change, not a source/mirror file divergence.

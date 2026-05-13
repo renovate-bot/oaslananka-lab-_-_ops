@@ -81,6 +81,21 @@ jobs:
             --target-dir "${work}" \
             --target-repository "${MIRROR_OWNER}/${MIRROR_REPO}" | tee render-report.json
 
+          mapfile -t generated_files < <(jq -r '.changes[]?' render-report.json)
+          format_files=()
+          for generated_file in "${generated_files[@]}"; do
+            case "${generated_file}" in
+              *.json|*.yml|*.yaml)
+                if [[ -f "${work}/${generated_file}" ]]; then
+                  format_files+=("${generated_file}")
+                fi
+                ;;
+            esac
+          done
+          if (( ${#format_files[@]} > 0 )); then
+            (cd "${work}" && npx --yes prettier@3.7.4 --write "${format_files[@]}")
+          fi
+
           if [[ -z "$(git -C "${work}" status --porcelain)" ]]; then
             echo "No publish workflow standardization changes."
             exit 0

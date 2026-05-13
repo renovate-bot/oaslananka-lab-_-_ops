@@ -13,10 +13,10 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  NODE_VERSION: '24.15.0'
-  VSCE_VERSION: '3.9.1'
-  OVSX_VERSION: '0.10.12'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.15.0"
+  VSCE_VERSION: "3.9.1"
+  OVSX_VERSION: "0.10.12"
 
 defaults:
   run:
@@ -69,7 +69,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: ''
+          cache: ""
       - name: Install dependencies
         run: |
           set -euo pipefail
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: ''
+          cache: ""
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package
@@ -199,7 +199,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: ''
+          cache: ""
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package

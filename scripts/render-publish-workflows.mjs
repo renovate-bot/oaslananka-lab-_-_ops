@@ -87,11 +87,13 @@ function standardizeMcpMetadata(targetDir, policy) {
   const pkg = packageMetadata(targetDir);
   const sourceOwner = policy.mirror?.source_owner || policy.repository_role?.source_of_truth_owner;
   const sourceRepo = policy.mirror?.source_repo || policy.mirror?.mirror_repo;
-  if (!sourceOwner || !sourceRepo) return false;
+  const mirrorOwner = policy.mirror?.mirror_owner || policy.repository_role?.execution_owner;
+  const mirrorRepo = policy.mirror?.mirror_repo || sourceRepo;
+  if (!sourceOwner || !sourceRepo || !mirrorOwner || !mirrorRepo) return false;
 
   metadata.name = `io.github.${sourceOwner}/${sourceRepo}`;
   metadata.repository = {
-    url: `https://github.com/${sourceOwner}/${sourceRepo}`,
+    url: `https://github.com/${mirrorOwner}/${mirrorRepo}`,
     source: "github",
   };
   if (pkg.version) metadata.version = pkg.version;

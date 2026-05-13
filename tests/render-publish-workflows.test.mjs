@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { renderPublishWorkflows } from "../scripts/render-publish-workflows.mjs";
 
-test("renders npm/MCP publish workflows and keeps MCP registry namespace on canonical source", async () => {
+test("renders npm/MCP publish workflows with canonical MCP name and mirror repository URL", async () => {
   const dir = mkdtempSync(join(tmpdir(), "publish-workflows-"));
   try {
     writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "mcp-infra-lens", version: "1.0.2" }, null, 2)}\n`);
@@ -36,7 +36,7 @@ test("renders npm/MCP publish workflows and keeps MCP registry namespace on cano
     assert.match(readFileSync(join(dir, ".github/workflows/publish-production.yml"), "utf8"), /oaslananka-lab\/mcp-infra-lens/);
     const server = JSON.parse(readFileSync(join(dir, "server.json"), "utf8"));
     assert.equal(server.name, "io.github.oaslananka/mcp-infra-lens");
-    assert.equal(server.repository.url, "https://github.com/oaslananka/mcp-infra-lens");
+    assert.equal(server.repository.url, "https://github.com/oaslananka-lab/mcp-infra-lens");
     assert.equal(server.version, "1.0.2");
     assert.equal(server.packages[0].identifier, "mcp-infra-lens");
     assert.equal(server.packages[0].version, "1.0.2");
