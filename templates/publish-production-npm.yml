@@ -152,7 +152,7 @@ jobs:
             evidence: [],
           };
           fs.writeFileSync("out/publish-report-npm.json", `${JSON.stringify(report, null, 2)}\n`);
-NODE
+          NODE
           }
           token="${NPM_TOKEN:-${FALLBACK_NODE_AUTH_TOKEN:-}}"
           if [[ -n "${token}" ]]; then

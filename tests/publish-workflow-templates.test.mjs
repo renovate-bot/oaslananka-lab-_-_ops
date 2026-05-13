@@ -11,6 +11,7 @@ test("Node publish templates use supported setup-node inputs and current trusted
     const text = template(name);
     assert.doesNotMatch(text, /package-manager-cache/);
     assert.doesNotMatch(text, /corepack install \|\| true/);
+    assert.doesNotMatch(text, /^NODE$/m);
     assert.match(text, /NODE_VERSION: "24\.15\.0"/);
   }
   assert.match(template("publish-production-npm.yml"), /NPM_VERSION: "11\.6\.2"/);
@@ -30,6 +31,8 @@ test("VSCE template packages once and publishes the VSIX artifact to both channe
   const text = template("publish-production-vsce.yml");
   assert.match(text, /VSCE_VERSION: "3\.9\.1"/);
   assert.match(text, /OVSX_VERSION: "0\.10\.12"/);
+  assert.match(text, /vscode-marketplace:[\s\S]*actions\/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e/);
+  assert.match(text, /open-vsx:[\s\S]*actions\/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e/);
   assert.match(text, /@vscode\/vsce@\$\{VSCE_VERSION\}" package --no-dependencies/);
   assert.match(text, /@vscode\/vsce@\$\{VSCE_VERSION\}" publish --packagePath/);
   assert.match(text, /ovsx@\$\{OVSX_VERSION\}" publish "\$\{vsix\}"/);
@@ -41,6 +44,8 @@ test("MCP registry templates pin mcp-publisher and do not download latest", () =
     const text = template(name);
     assert.match(text, /MCP_PUBLISHER_VERSION: "1\.7\.9"/);
     assert.match(text, /releases\/download\/v\$\{MCP_PUBLISHER_VERSION\}/);
+    assert.match(text, /registry_\$\{MCP_PUBLISHER_VERSION\}_checksums\.txt/);
+    assert.match(text, /sha256sum -c checksums\.filtered/);
     assert.doesNotMatch(text, /releases\/latest\/download/);
   }
 });

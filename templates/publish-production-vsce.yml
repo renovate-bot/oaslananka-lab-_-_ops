@@ -122,6 +122,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package
@@ -158,7 +161,7 @@ jobs:
             evidence: [],
           };
           fs.writeFileSync(process.env.REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
-NODE
+          NODE
           }
           token="${VSCE_PAT:-${VS_MARKETPLACE_TOKEN:-}}"
           if [[ -z "${token}" ]]; then echo "MARKETPLACE_SECRET_MISSING"; write_report "failed" "external_blocker" "MARKETPLACE_SECRET_MISSING"; exit 1; fi
@@ -194,6 +197,9 @@ NODE
     permissions:
       contents: read
     steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package
@@ -230,7 +236,7 @@ NODE
             evidence: [],
           };
           fs.writeFileSync(process.env.REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
-NODE
+          NODE
           }
           token="${OVSX_PAT:-${OPEN_VSX_TOKEN:-}}"
           if [[ -z "${token}" ]]; then echo "OPEN_VSX_SECRET_MISSING"; write_report "failed" "external_blocker" "OPEN_VSX_SECRET_MISSING"; exit 1; fi

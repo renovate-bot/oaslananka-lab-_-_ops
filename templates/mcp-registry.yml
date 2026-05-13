@@ -47,8 +47,15 @@ jobs:
           set -euo pipefail
           arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_${os}_${arch}.tar.gz" | tar xz mcp-publisher
-          sudo install -m 0755 mcp-publisher /usr/local/bin/mcp-publisher
+          asset="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}"
+          tmp="$(mktemp -d)"
+          curl -fsSL "${base_url}/${asset}" -o "${tmp}/${asset}"
+          curl -fsSL "${base_url}/registry_${MCP_PUBLISHER_VERSION}_checksums.txt" -o "${tmp}/checksums.txt"
+          grep "  ${asset}$" "${tmp}/checksums.txt" > "${tmp}/checksums.filtered"
+          (cd "${tmp}" && sha256sum -c checksums.filtered)
+          tar -xzf "${tmp}/${asset}" -C "${tmp}" mcp-publisher
+          sudo install -m 0755 "${tmp}/mcp-publisher" /usr/local/bin/mcp-publisher
       - name: Login via GitHub OIDC
         run: mcp-publisher login github-oidc
       - name: Validate server.json
