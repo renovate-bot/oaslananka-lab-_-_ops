@@ -277,6 +277,8 @@ jobs:
               echo "direct write blocked by ruleset"
             elif [[ -s "${combined}" ]] && grep -Eiq 'merge conflict|CONFLICT|Pull Request has merge conflicts|sync branch.*conflict' "${combined}"; then
               echo "mirror sync conflict"
+            elif [[ -s "${combined}" ]] && grep -Eiq 'OSV lockfile scan|osv-scanner|known vulnerabilit(y|ies)|OSV URL|https://osv\.dev/GHSA-|fixed version' "${combined}"; then
+              echo "osv vulnerability detected"
             elif [[ -s "${combined}" ]] && grep -Eiq 'pin.*action|unpinned|deprecated action|Node.js 20 actions are deprecated|uses:.*@[vV]?[0-9]' "${combined}"; then
               echo "action pin update"
             elif [[ -s "${combined}" ]] && grep -Eiq 'lockfile|frozen-lockfile|ERR_PNPM_OUTDATED_LOCKFILE|package-lock.json|pnpm-lock.yaml' "${combined}"; then
@@ -343,6 +345,9 @@ jobs:
                 ;;
               "mirror sync conflict")
                 printf '%s\n' "Regenerate the sync PR from current source and mirror heads, then merge only after required checks report success."
+                ;;
+              "osv vulnerability detected")
+                printf '%s\n' "OSV found a lockfile vulnerability with a fixed version. Create or wait for the specific dependency update PR for the affected package, merge/promote that fix, then retry unrelated dependency PRs."
                 ;;
               "review-thread patch")
                 printf '%s\n' "Apply only the one-line suggested change from the unresolved review thread, then rerun diagnostics."
@@ -666,7 +671,7 @@ jobs:
               "codecov token required")
                 patch_codecov_nonblocking "${repo_dir}"
                 ;;
-              "workflow syntax"|"simple permission"|"review-thread patch"|"actionlint failure"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app"|"required check expected but not reported"|"ruleset required check mismatch"|"config-only pr blocked by ruleset"|"publish already published idempotent noop"|"github api rate limit"|"direct write blocked by ruleset"|"mirror sync conflict")
+              "workflow syntax"|"simple permission"|"review-thread patch"|"actionlint failure"|"npm publish auth missing"|"npm token secret missing"|"npm trusted publishing missing"|"npm package name unavailable"|"npm registry permission denied"|"vscode marketplace secret missing"|"open vsx secret missing"|"mcp registry config missing"|"mcp registry secret missing"|"ruleset codeowner review required"|"ruleset bypass not configurable by api"|"codeowner approval not automatable by app"|"required check expected but not reported"|"ruleset required check mismatch"|"config-only pr blocked by ruleset"|"publish already published idempotent noop"|"github api rate limit"|"direct write blocked by ruleset"|"mirror sync conflict"|"osv vulnerability detected")
                 return 2
                 ;;
               *)

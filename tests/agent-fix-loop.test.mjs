@@ -33,6 +33,7 @@ test("unknown fallback still exists only after explicit rollout matchers", () =>
     "NPM_PUBLISH_E404",
     "Waiting on code owner review",
     "MCP_REGISTRY_CREDENTIALS_MISSING",
+    "OSV lockfile scan",
   ]) {
     const markerIndex = workflow.indexOf(marker);
     assert.ok(markerIndex > 0, `${marker} matcher is present`);
@@ -87,6 +88,16 @@ test("typescript baseUrl deprecation is classified before generic format lint", 
   assert.match(workflow, /TS5101\|Option \.baseUrl\. is deprecated\|ignoreDeprecations\.\*6\\\.0\|TypeScript 7\\\.0/);
   assert.match(workflow, /"typescript baseUrl deprecation"\)/);
   assert.match(workflow, /patch_typescript_baseurl_deprecation/);
+});
+
+test("OSV lockfile vulnerabilities are classified before generic lockfile failures", () => {
+  const osvIndex = workflow.indexOf('echo "osv vulnerability detected"');
+  const lockfileIndex = workflow.indexOf('echo "missing lockfile"');
+  assert.ok(osvIndex > 0, "OSV vulnerability classifier exists");
+  assert.ok(lockfileIndex > 0, "generic lockfile classifier exists");
+  assert.ok(osvIndex < lockfileIndex, "OSV vulnerability is classified before generic lockfile matching");
+  assert.match(workflow, /OSV lockfile scan\|osv-scanner\|known vulnerabilit/);
+  assert.match(workflow, /"osv vulnerability detected"\)/);
 });
 
 test("typescript baseUrl patch adds ignoreDeprecations only where needed and is idempotent", async () => {

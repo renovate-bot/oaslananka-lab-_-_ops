@@ -27,6 +27,7 @@ const requiredClassifications = [
   "github api rate limit",
   "direct write blocked by ruleset",
   "mirror sync conflict",
+  "osv vulnerability detected",
   "codecov token required",
 ];
 
