@@ -83,7 +83,7 @@ jobs:
       - name: Build extension
         run: |
           set -euo pipefail
-          if [[ -f pnpm-lock.yaml ]]; then corepack pnpm run build --if-present; else npm run build --if-present; fi
+          if [[ -f pnpm-lock.yaml ]]; then corepack pnpm run --if-present build; else npm run --if-present build; fi
       - name: Validate extension manifest
         id: meta
         run: |
