@@ -18,6 +18,9 @@ pr:
   finalize: true
   merge: true
   require_clean_checks: false
+  require_zero_pending_checks: false
+  require_zero_unresolved_threads: false
+
   require_human_review: false
   allow_immediate_merge: true
   require_expected_head_sha: true

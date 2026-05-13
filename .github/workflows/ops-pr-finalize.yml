@@ -248,6 +248,7 @@ jobs:
           node scripts/ops-policy.mjs get --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" > "${OUT}/policy.json"
           node scripts/ops-policy.mjs check --owner "${TARGET_OWNER}" --repo "${TARGET_REPO}" >/dev/null
           record "policy" "loaded" "${REPO}"
+          repo_role="$(jq -r '.repository_role.role // ""' "${OUT}/policy.json")"
 
           if [[ "$(jq -r '.autonomy.enabled' "${OUT}/policy.json")" != "true" ]]; then
             final_state="policy_disabled"
@@ -308,7 +309,22 @@ jobs:
             fi
           fi
 
+          diagnostics_required="false"
           if [[ "${pr_merged}" != "true" ]]; then
+            if [[ "$(jq -r '.pr.require_clean_checks' "${OUT}/policy.json")" == "true" ||
+                  "$(jq -r '.pr.require_zero_pending_checks' "${OUT}/policy.json")" == "true" ||
+                  "$(jq -r '.pr.require_zero_unresolved_threads' "${OUT}/policy.json")" == "true" ||
+                  "$(jq -r '.pr.require_human_review' "${OUT}/policy.json")" == "true" ]]; then
+              diagnostics_required="true"
+            fi
+            if [[ "${repo_role}" == "canonical_source" &&
+                  "$(jq -r '.source.actions_expected_enabled // true' "${OUT}/policy.json")" == "false" &&
+                  "$(jq -r '.pr.require_human_review' "${OUT}/policy.json")" != "true" ]]; then
+              diagnostics_required="false"
+            fi
+          fi
+
+          if [[ "${pr_merged}" != "true" && "${diagnostics_required}" == "true" ]]; then
             diagnostics_run_id="$(dispatch_ops_workflow agent-pr-diagnostics.yml \
               target_owner "${TARGET_OWNER}" \
               target_repo "${TARGET_REPO}" \
@@ -361,6 +377,8 @@ jobs:
               record "review" "required" "reviewDecision=${review_decision}"
               exit 0
             fi
+          elif [[ "${pr_merged}" != "true" ]]; then
+            record "diagnostics" "skipped" "policy does not require diagnostics gates for ${repo_role}"
           fi
 
           if [[ "${REQUESTED_ACTION}" == "publish" ]]; then
