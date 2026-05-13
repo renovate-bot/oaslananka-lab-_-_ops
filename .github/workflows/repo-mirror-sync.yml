@@ -237,6 +237,26 @@ jobs:
             git push target "HEAD:${branch_ref}" --force-with-lease || \
               git push target "HEAD:${branch_ref}" --force
 
+            sync_prefix="repo-ops/sync-${SOURCE_REPO}-"
+            target_api --method GET "repos/${TARGET_FULL}/pulls" \
+              -f state=open \
+              -f base="${default_branch}" \
+              > "${OUT}/open-sync-prs.json" 2>/dev/null || true
+            if [[ -s "${OUT}/open-sync-prs.json" ]]; then
+              jq -r \
+                --arg prefix "${sync_prefix}" \
+                --arg current "${branch}" \
+                '.[] | select(.head.ref | startswith($prefix)) | select(.head.ref != $current) | "\(.number) \(.head.ref)"' \
+                "${OUT}/open-sync-prs.json" > "${OUT}/stale-sync-list.txt" 2>/dev/null || true
+              while IFS=' ' read -r stale_num stale_branch; do
+                [[ -z "${stale_num}" ]] && continue
+                target_api --method PATCH "repos/${TARGET_FULL}/pulls/${stale_num}" \
+                  -f state=closed >/dev/null 2>&1 || true
+                target_api --method DELETE "repos/${TARGET_FULL}/git/refs/heads/${stale_branch}" >/dev/null 2>&1 || true
+                record "stale_sync_pr" "closed" "#${stale_num} ${stale_branch}"
+              done < "${OUT}/stale-sync-list.txt"
+            fi
+
             existing_pr="$(target_api --method GET "repos/${TARGET_FULL}/pulls" \
               -f state=open \
               -f head="${TARGET_OWNER}:${branch}" \
