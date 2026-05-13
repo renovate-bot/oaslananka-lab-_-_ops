@@ -13,11 +13,16 @@ function parseArgs(argv) {
     targetDir: "",
     targetRepository: "",
     standardizeMcpMetadata: true,
+    selfHosted: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--no-standardize-mcp-metadata") {
       args.standardizeMcpMetadata = false;
+      continue;
+    }
+    if (arg === "--self-hosted") {
+      args.selfHosted = true;
       continue;
     }
     if (!arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
@@ -41,13 +46,13 @@ function readTemplate(name, targetRepository) {
 function pnpmOnlyWorkflow(content) {
   return content
     .replace(
-      /          if \[\[ -f pnpm-lock\.yaml \]\]; then\n            corepack enable\n            corepack install\n            corepack pnpm install --frozen-lockfile\n            corepack pnpm run build --if-present\n            corepack pnpm run prepublishOnly --if-present\n            corepack pnpm pack --pack-destination publish-artifact\n          else\n            if \[\[ -f package-lock\.json \|\| -f npm-shrinkwrap\.json \]\]; then npm ci; else npm install; fi\n            npm rebuild better-sqlite3 --if-present\n            npm run build --if-present\n            npm run prepublishOnly --if-present\n            npm pack --pack-destination publish-artifact\n          fi/g,
+      /          if \[\[ -f pnpm-lock\.yaml \]\]; then\n            corepack enable\n            corepack install\n            corepack pnpm install --frozen-lockfile\n            corepack pnpm run --if-present build\n            corepack pnpm run --if-present prepublishOnly\n            corepack pnpm pack --pack-destination publish-artifact\n          else\n            if \[\[ -f package-lock\.json \|\| -f npm-shrinkwrap\.json \]\]; then npm ci; else npm install; fi\n            npm rebuild better-sqlite3 --if-present\n            npm run --if-present build\n            npm run --if-present prepublishOnly\n            npm pack --pack-destination publish-artifact\n          fi/g,
       [
         "          corepack enable",
         "          corepack install",
         "          corepack pnpm install --frozen-lockfile",
-        "          corepack pnpm run build --if-present",
-        "          corepack pnpm run prepublishOnly --if-present",
+        "          corepack pnpm run --if-present build",
+        "          corepack pnpm run --if-present prepublishOnly",
         "          corepack pnpm pack --pack-destination publish-artifact",
       ].join("\n"),
     )
@@ -56,9 +61,14 @@ function pnpmOnlyWorkflow(content) {
       ["          corepack enable", "          corepack install", "          corepack pnpm install --frozen-lockfile"].join("\n"),
     )
     .replace(
-      /          if \[\[ -f pnpm-lock\.yaml \]\]; then corepack pnpm run build --if-present; else npm run build --if-present; fi/g,
-      "          corepack pnpm run build --if-present",
+      /          if \[\[ -f pnpm-lock\.yaml \]\]; then corepack pnpm run --if-present build; else npm run --if-present build; fi/g,
+      "          corepack pnpm run --if-present build",
     );
+}
+
+function selfHostedWorkflow(content) {
+  return content
+    .replace(/runs-on: ubuntu-24\.04/g, "runs-on: [self-hosted, Linux, X64]");
 }
 
 function writeIfChanged(file, content) {
@@ -131,11 +141,15 @@ export function renderPublishWorkflows(args) {
     publishTemplate = "deploy-pages.yml";
   }
 
+  const applyTransforms = (content) => {
+    let out = fs.existsSync(path.join(targetDir, "pnpm-lock.yaml")) ? pnpmOnlyWorkflow(content) : content;
+    if (args.selfHosted) out = selfHostedWorkflow(out);
+    return out;
+  };
+
   if (publishTemplate) {
     const file = path.join(workflowDir, publishTemplate === "deploy-pages.yml" ? "deploy-pages.yml" : "publish-production.yml");
-    const rendered = fs.existsSync(path.join(targetDir, "pnpm-lock.yaml"))
-      ? pnpmOnlyWorkflow(readTemplate(publishTemplate, targetRepository))
-      : readTemplate(publishTemplate, targetRepository);
+    const rendered = applyTransforms(readTemplate(publishTemplate, targetRepository));
     if (writeIfChanged(file, rendered)) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
@@ -143,7 +157,8 @@ export function renderPublishWorkflows(args) {
 
   if (policy.publish?.mcp_registry) {
     const file = path.join(workflowDir, "mcp-registry.yml");
-    if (writeIfChanged(file, readTemplate("mcp-registry.yml", targetRepository))) {
+    const rendered = applyTransforms(readTemplate("mcp-registry.yml", targetRepository));
+    if (writeIfChanged(file, rendered)) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
     if (args.standardizeMcpMetadata && standardizeMcpMetadata(targetDir, policy)) {

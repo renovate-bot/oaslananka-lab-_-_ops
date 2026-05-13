@@ -79,7 +79,8 @@ jobs:
             --policy-owner oaslananka-lab \
             --policy-repo "${MIRROR_REPO}" \
             --target-dir "${work}" \
-            --target-repository "${MIRROR_OWNER}/${MIRROR_REPO}" | tee render-report.json
+            --target-repository "${SOURCE_OWNER}/${SOURCE_REPO}" \
+            --self-hosted | tee render-report.json
 
           mapfile -t generated_files < <(jq -r '.changes[]?' render-report.json)
           format_files=()
@@ -116,7 +117,7 @@ jobs:
             gh pr edit "${existing}" \
               --repo "${SOURCE_OWNER}/${SOURCE_REPO}" \
               --title "ci(publish): standardize production publishing" \
-              --body "Standardizes production publish workflows from _ops templates. The workflow guard targets ${MIRROR_OWNER}/${MIRROR_REPO}; source Actions remain inert by policy."
+              --body "Standardizes production publish workflows from _ops templates. Workflow runs on self-hosted runner in source repo (${SOURCE_OWNER}/${SOURCE_REPO}); guard targets source so mirror copy is inert."
             echo "Updated PR #${existing}"
           else
             gh pr create \
@@ -124,5 +125,5 @@ jobs:
               --base main \
               --head "${branch}" \
               --title "ci(publish): standardize production publishing" \
-              --body "Standardizes production publish workflows from _ops templates. The workflow guard targets ${MIRROR_OWNER}/${MIRROR_REPO}; source Actions remain inert by policy."
+              --body "Standardizes production publish workflows from _ops templates. Workflow runs on self-hosted runner in source repo (${SOURCE_OWNER}/${SOURCE_REPO}); guard targets source so mirror copy is inert."
           fi
