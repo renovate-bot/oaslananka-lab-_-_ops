@@ -93,7 +93,7 @@ oaslananka/cifence                    -> oaslananka-lab/cifence
 oaslananka/oaslananka.github.io       -> oaslananka-lab/oaslananka.github.io
 ```
 
-Topology audits succeeded for all seven mirrors. Open Dependabot PRs observed in `fovux`, `a2a-mesh`, and `oaslananka.github.io` are ordinary dependency PR inventory, not source/mirror rollout blockers.
+Topology audits succeeded for all seven mirrors. Dependabot PRs are policy-managed by `_ops`. Source-side Dependabot PRs are closed when source automation is disabled, and mirror-side PRs are either finalized, labeled `dependabot-major-review-required`, or labeled `needs-human-conflict-resolution`.
 
 Default-branch force-push is still refused. If source and mirror diverge and are not tree-equal, sync reports the exact unsafe state instead of rewriting protected history.
 
@@ -112,4 +112,29 @@ The latest full rollout verified that source/mirror release gates accept either 
 | `mcp-infra-lens` | `tree_equal` | `repo-topology-audit.yml` run `25648472903` |
 | `test` | `equal` | `repo-topology-audit.yml` run `25648483593` |
 
-Open product blockers are not topology blockers. They are publish workflow/environment gaps or repository ruleset review gates, and are tracked in `docs/full-rollout-status.md`.
+Open product blockers are not topology blockers. Publish/registry states are tracked separately in `docs/full-rollout-status.md`; dependency backlog state is tracked in `docs/dependabot-automation.md`.
+
+## 2026-05-13 Fleet Topology Snapshot
+
+| Repo | Relation | Dependabot config | Current action |
+|---|---|---|---|
+| `boardguard` | `tree_equal` | `match` | none |
+| `kicad-studio` | `tree_equal` | `match` | none |
+| `mcp-health-monitor` | `tree_equal` | `match` | none |
+| `mcp-debug-recorder` | `tree_equal` | `match` | none |
+| `mcp-infra-lens` | `tree_equal` | `match` | none |
+| `kicad-mcp-pro` | `tree_equal` | `match` | none |
+| `mcp-ssh-tool` | `tree_equal` | `match` | restored by `mcp-ssh-tool#76` |
+| `fovux` | `tree_equal` | `match` | none |
+| `a2a-mesh` | `tree_equal` | `match` | TypeScript 6 PR merged/promoted |
+| `codex-app-server-web` | `tree_equal` | `match` | none |
+| `cifence` | `equal` | `match` | none |
+| `oaslananka.github.io` | `tree_equal` | `match` | none |
+| `test` | `equal` | `not_managed` | none |
+
+Evidence:
+
+```text
+Fleet parity audit: https://github.com/oaslananka-lab/_ops/actions/runs/25769426735
+Mirror drift check: https://github.com/oaslananka-lab/_ops/actions/runs/25769438579
+```

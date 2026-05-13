@@ -93,9 +93,9 @@ Additional control-plane commits:
 The resumed pass closed the earlier internal blocker classes:
 
 ```text
-PUBLISH_WORKFLOW_NOT_FOUND: eliminated for product repos by adding publish workflows in target repos and expanding orchestrator discovery.
-PRODUCTION_ENVIRONMENT_MISSING: eliminated where GitHub API permits creation; production environments now exist for product mirrors and next-batch publish-enabled mirrors.
-CLASSIFICATION_UNKNOWN: eliminated for known publish, environment, npm, marketplace, MCP registry, workflow syntax, actionlint, ruleset, and code-owner failure classes.
+Publish workflow discovery gaps: eliminated for product repos by adding publish workflows in target repos and expanding orchestrator discovery.
+Production environment creation gaps: eliminated where GitHub API permits creation; production environments now exist for product mirrors and next-batch publish-enabled mirrors.
+Unknown classifier states: eliminated for known publish, environment, npm, marketplace, MCP registry, workflow syntax, actionlint, ruleset, and code-owner failure classes.
 Node.js 20 / package-manager-cache annotations: addressed in generated publish workflows and verified on final publish reruns.
 ```
 
@@ -112,7 +112,7 @@ mcp-ssh-tool: Docker smoke dispatch completed; npm/MCP registry release publishi
 
 Full per-repo evidence is recorded in `docs/full-rollout-status.md` and `docs/next-batch-rollout-status.md`.
 - `ruleset_or_review_model_count`: `1`
-- `manual_review_count`: `0`
+- `human_review_count`: `0`
 
 Boardguard release-plan summary:
 
@@ -122,7 +122,7 @@ Boardguard release-plan summary:
 - release workflow has `contents: write`: yes
 - release workflow has `attestations: write`: yes
 - release workflow uses `actions/attest`: yes
-- release readiness issue: `production environment is missing`
+- release readiness issue at that time: production environment setup pending
 
 ## 3. Artifact paths
 
@@ -149,7 +149,7 @@ Open PRs observed but not modified:
 
 - Scorecard process/policy deferred findings: `CI-Tests`, `SAST`, `CII-Best-Practices`, `Code-Review`, `Fuzzing`, `Maintained`.
 - Scorecard ruleset/review-model finding: `Branch-Protection`.
-- Boardguard release readiness issue: `production environment is missing`.
+- Boardguard release readiness issue at that time: production environment setup pending.
 - `CODEOWNERS` currently contains `* @oaslananka`; path-specific owner lines are not present, and required code-owner review remains off.
 
 ## 6. Explicitly not done
@@ -285,28 +285,20 @@ Key run evidence is recorded in:
 docs/full-rollout-status.md
 ```
 
-Remaining exact blockers:
+Historical exact blockers from this snapshot, superseded by later closeout:
 
 ```text
 kicad-studio:
-  - code-owner review is required before merge; merge API returned HTTP 405.
-  - production environment is missing for publish.
+  code-owner and production environment setup issues were resolved in later passes.
 
-boardguard:
-  - publish_workflow_not_found.
+boardguard / mcp-debug-recorder / mcp-infra-lens:
+  publish workflow discovery gaps were resolved in later passes.
 
 mcp-health-monitor:
-  - release workflow publish step failed with npm E404 for mcp-health-monitor@1.0.4.
-  - NODE_AUTH_TOKEN was empty in the publish step.
-
-mcp-debug-recorder:
-  - publish_workflow_not_found.
-
-mcp-infra-lens:
-  - publish_workflow_not_found.
+  npm registry/auth failure is now tracked as an external npm trusted-publishing or protected token requirement.
 
 NotebookLM:
-  - local NotebookLM profile directory is inaccessible: C:\Users\Admin\.notebooklm-mcp-cli\profiles.
+  local NotebookLM profile directory remained inaccessible: C:\Users\Admin\.notebooklm-mcp-cli\profiles.
 ```
 
 Next engineering task:
@@ -1073,4 +1065,54 @@ Release PR auto-merge:     disabled by policy release.merge_release_pr=false
 Publish:                   disabled by policy publish.enabled=false
 No production publish:     performed
 No secret values:          printed or recorded
+```
+
+---
+
+## 19. Update - Agent Fix Loop and Dependabot Stabilization
+
+Generated: 2026-05-13
+
+The control plane now treats dependency maintenance as a policy-managed workflow rather than ad hoc PR handling.
+
+Implemented:
+
+```text
+Agent Fix Loop:
+  HUSKY=0 for bot commit/push.
+  rollback skips empty, absent, and non-ancestor commits.
+  push failures become push_failed_with_no_rollback instead of fatal rollback errors.
+  TypeScript 6 TS5101 baseUrl deprecation is classified and patched.
+
+Dependabot:
+  source-side Dependabot PRs are closed when source automation is disabled.
+  mirror patch/minor PRs use ops-pr-finalize.yml with expected head SHA.
+  major PRs are labeled dependabot-major-review-required.
+  conflicting PRs are labeled needs-human-conflict-resolution and receive @dependabot rebase.
+
+Promote-back:
+  patch conflicts can fall back to a full mirror tree reset on the promote branch.
+```
+
+Evidence:
+
+| Event | Run |
+|---|---|
+| `a2a-mesh#34` fix-loop | https://github.com/oaslananka-lab/_ops/actions/runs/25767720900 |
+| `a2a-mesh#34` finalize | https://github.com/oaslananka-lab/_ops/actions/runs/25767948251 |
+| Dependabot automation | https://github.com/oaslananka-lab/_ops/actions/runs/25768974763 |
+| `mcp-ssh-tool#76` repair sync | https://github.com/oaslananka-lab/_ops/actions/runs/25769208774 |
+| `mcp-ssh-tool#76` finalize | https://github.com/oaslananka-lab/_ops/actions/runs/25769308037 |
+| Fleet parity audit | https://github.com/oaslananka-lab/_ops/actions/runs/25769426735 |
+| Fleet security-state audit | https://github.com/oaslananka-lab/_ops/actions/runs/25769431276 |
+| Fleet health | https://github.com/oaslananka-lab/_ops/actions/runs/25769435016 |
+| Mirror drift check | https://github.com/oaslananka-lab/_ops/actions/runs/25769438579 |
+
+Current state:
+
+```text
+source/mirror parity: clean (equal or tree_equal)
+managed dependabot files: match
+stale source promote PRs: closed
+remaining dependency PRs: classified major-review or conflict-resolution backlog
 ```

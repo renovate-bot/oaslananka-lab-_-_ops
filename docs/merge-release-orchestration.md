@@ -67,7 +67,7 @@ release_workflow_not_found
 release_workflow_dispatched
 release_pr_open_merge_disabled
 publish_disabled
-publish_workflow_not_found
+publish_workflow_discovery_missing
 awaiting_environment_approval
 release_complete
 ```
@@ -102,33 +102,6 @@ mcp-ssh-tool: https://github.com/oaslananka-lab/_ops/actions/runs/25685245036
 
 The orchestrator still refuses to publish from PR heads. When no merge commit SHA is supplied it resolves the immutable `main` commit SHA before dispatching `publish-production.yml`.
 
-The full rollout exercised the release and publish paths after enabling product publish policy.
+The full rollout exercised the release and publish paths after enabling product publish policy. Later closeout passes added publish workflow templates, expanded orchestrator discovery, and created production environments through `_ops`, so product repositories no longer have internal publish-workflow discovery or production-environment creation blockers.
 
-Observed states:
-
-```text
-boardguard:
-  release orchestrator run 25648564700
-  final_state publish_workflow_not_found
-
-kicad-studio:
-  release orchestrator run 25648590951
-  final_state publish_workflow_not_found
-  ruleset audit also reported production environment missing
-
-mcp-health-monitor:
-  release orchestrator run 25648861038
-  final_state release_workflow_failed
-  release workflow run 25648732393 failed in release-assets / Publish to npm
-  npm returned E404 for mcp-health-monitor@1.0.4 while NODE_AUTH_TOKEN was empty
-
-mcp-debug-recorder:
-  release orchestrator run 25648655235
-  final_state publish_workflow_not_found
-
-mcp-infra-lens:
-  release orchestrator run 25648679014
-  final_state publish_workflow_not_found
-```
-
-`publish_workflow_not_found` is a blocker for this rollout because publish policy is enabled for the product repositories. It is not reported as `publish_disabled`.
+Current publish-state contract details are in `docs/publish-state-contract.md`. Current per-repo source/mirror and publish status is in `docs/full-rollout-status.md` and `docs/next-batch-rollout-status.md`.

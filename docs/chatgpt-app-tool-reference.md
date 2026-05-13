@@ -102,9 +102,9 @@ The ChatGPT App should surface external blockers as typed tool results with exac
 Current app-facing blocker states should be exposed as structured failure explanations:
 
 ```text
-ruleset_code_owner_review_required
-production_environment_missing
-publish_workflow_not_found
-npm_publish_e404
+codeowner_approval_not_automatable_by_app
+external_secret_value_required_with_exact_secret_name
+external_registry_configuration_required_with_exact_steps
+idempotent_publish_noop
 notebooklm_local_profile_access_denied
 ```

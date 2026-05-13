@@ -1,8 +1,8 @@
 # Next Batch Rollout Status
 
-Generated: 2026-05-11
+Generated: 2026-05-13
 
-This report covers the resumed onboarding batch after the initial source/mirror rollout.
+This report covers the expanded repository batch. It reflects the post-closeout state after Dependabot automation and source/mirror parity repairs.
 
 ## Scope
 
@@ -16,34 +16,55 @@ This report covers the resumed onboarding batch after the initial source/mirror 
 | `cifence` | `oaslananka/cifence` | `oaslananka-lab/cifence` | packaged GitHub Action/tool | GitHub release only; no separate package publish target detected |
 | `oaslananka.github.io` | `oaslananka/oaslananka.github.io` | `oaslananka-lab/oaslananka.github.io` | site repo | GitHub Pages/deploy workflow |
 
-## Policy Commit
+## Current Fleet Evidence
 
-`0562088e3b868ed526770a41c99f66410b527696` added source and mirror policy files for every repository in this batch.
+| Check | Run |
+|---|---|
+| Fleet parity audit | https://github.com/oaslananka-lab/_ops/actions/runs/25769426735 |
+| Fleet security-state audit | https://github.com/oaslananka-lab/_ops/actions/runs/25769431276 |
+| Fleet health | https://github.com/oaslananka-lab/_ops/actions/runs/25769435016 |
+| Mirror drift check | https://github.com/oaslananka-lab/_ops/actions/runs/25769438579 |
 
-`4b0066027ac32e06f3bedd5ff0ffa1866772ecbf` fixed publish workflow discovery so the orchestrator skips workflows without `workflow_dispatch`, recognizes `mcp-registry.yml`, and dispatches MCP registry workflows with `publish=true`.
+## Current Source/Mirror State
 
-## Evidence
-
-| Repo | Topology audit | Ruleset audit | Repo audit | Release plan | Release gate | Release orchestrator | Publish/deploy state | Remaining |
-|---|---|---|---|---|---|---|---|---|
-| `kicad-mcp-pro` | https://github.com/oaslananka-lab/_ops/actions/runs/25684378929 | https://github.com/oaslananka-lab/_ops/actions/runs/25684382014 | https://github.com/oaslananka-lab/_ops/actions/runs/25684385513 | https://github.com/oaslananka-lab/_ops/actions/runs/25684388414 | https://github.com/oaslananka-lab/_ops/actions/runs/25685246099 | https://github.com/oaslananka-lab/_ops/actions/runs/25685232435 | awaiting environment approval on MCP Registry run https://github.com/oaslananka-lab/kicad-mcp-pro/actions/runs/25685286341 | `AWAITING_PRODUCTION_ENVIRONMENT_APPROVAL`; `MCP_REGISTRY_TOKEN` missing for production |
-| `mcp-ssh-tool` | https://github.com/oaslananka-lab/_ops/actions/runs/25684391576 | https://github.com/oaslananka-lab/_ops/actions/runs/25684394684 | https://github.com/oaslananka-lab/_ops/actions/runs/25684397857 | https://github.com/oaslananka-lab/_ops/actions/runs/25684401028 | https://github.com/oaslananka-lab/_ops/actions/runs/25685253400 | https://github.com/oaslananka-lab/_ops/actions/runs/25685245036 | release workflow clean; Docker workflow smoke clean at https://github.com/oaslananka-lab/mcp-ssh-tool/actions/runs/25685436692 | npm/MCP publish still requires production workflow/registry configuration and `NPM_TOKEN` or trusted publishing plus `MCP_REGISTRY_TOKEN` |
-| `fovux` | https://github.com/oaslananka-lab/_ops/actions/runs/25684404004 | https://github.com/oaslananka-lab/_ops/actions/runs/25684407091 | https://github.com/oaslananka-lab/_ops/actions/runs/25684410194 | https://github.com/oaslananka-lab/_ops/actions/runs/25684413281 | https://github.com/oaslananka-lab/_ops/actions/runs/25684604125 | https://github.com/oaslananka-lab/_ops/actions/runs/25684606799 | `NO_PUBLISH_TARGET_DETECTED` | open Dependabot PRs remain outside rollout scope: mirror #31, source #26 |
-| `a2a-mesh` | https://github.com/oaslananka-lab/_ops/actions/runs/25684416349 | https://github.com/oaslananka-lab/_ops/actions/runs/25684419813 | https://github.com/oaslananka-lab/_ops/actions/runs/25684422826 | https://github.com/oaslananka-lab/_ops/actions/runs/25684426329 | https://github.com/oaslananka-lab/_ops/actions/runs/25684610804 | https://github.com/oaslananka-lab/_ops/actions/runs/25684615185 | `published` | source Dependabot PRs #11, #12, #13 remain outside rollout scope |
-| `codex-app-server-web` | https://github.com/oaslananka-lab/_ops/actions/runs/25684429537 | https://github.com/oaslananka-lab/_ops/actions/runs/25684432859 | https://github.com/oaslananka-lab/_ops/actions/runs/25684435891 | https://github.com/oaslananka-lab/_ops/actions/runs/25684439270 | https://github.com/oaslananka-lab/_ops/actions/runs/25684619941 | https://github.com/oaslananka-lab/_ops/actions/runs/25684623913 | `NO_PUBLISH_TARGET_DETECTED` | none |
-| `cifence` | https://github.com/oaslananka-lab/_ops/actions/runs/25684442810 | https://github.com/oaslananka-lab/_ops/actions/runs/25684445795 | https://github.com/oaslananka-lab/_ops/actions/runs/25684448959 | https://github.com/oaslananka-lab/_ops/actions/runs/25684451896 | https://github.com/oaslananka-lab/_ops/actions/runs/25684627982 | https://github.com/oaslananka-lab/_ops/actions/runs/25684631878 | `NO_PUBLISH_TARGET_DETECTED` | none |
-| `oaslananka.github.io` | https://github.com/oaslananka-lab/_ops/actions/runs/25684455019 | https://github.com/oaslananka-lab/_ops/actions/runs/25684458106 | https://github.com/oaslananka-lab/_ops/actions/runs/25684461553 | https://github.com/oaslananka-lab/_ops/actions/runs/25684464810 | https://github.com/oaslananka-lab/_ops/actions/runs/25684637699 | https://github.com/oaslananka-lab/_ops/actions/runs/25684640860 | `published` | open Dependabot PRs remain outside rollout scope: mirror #8-#12, source #8-#11 |
-
-## Production Environment Audit
-
-Production environments were created through `_ops` using GitHub App tokens:
-
-| Repo | Run | State | Missing secret names |
+| Repo | Tree relation | Dependabot config relation | Current action |
 |---|---|---|---|
-| `kicad-mcp-pro` | https://github.com/oaslananka-lab/_ops/actions/runs/25685165883 | `production_environment_created` | `MCP_REGISTRY_TOKEN` |
-| `mcp-ssh-tool` | https://github.com/oaslananka-lab/_ops/actions/runs/25685169238 | `production_environment_created` | `MCP_REGISTRY_TOKEN`, `NODE_AUTH_TOKEN`, `NPM_TOKEN` |
-| `a2a-mesh` | https://github.com/oaslananka-lab/_ops/actions/runs/25685172692 | `production_environment_created` | `NODE_AUTH_TOKEN`, `NPM_TOKEN` |
-| `oaslananka.github.io` | https://github.com/oaslananka-lab/_ops/actions/runs/25685176236 | `production_environment_created` | none |
+| `kicad-mcp-pro` | `tree_equal` | `match` | none |
+| `mcp-ssh-tool` | `tree_equal` | `match` | repaired by `mcp-ssh-tool#76` and finalize run https://github.com/oaslananka-lab/_ops/actions/runs/25769308037 |
+| `fovux` | `tree_equal` | `match` | none |
+| `a2a-mesh` | `tree_equal` | `match` | `a2a-mesh#34` merged and promoted; stale source PRs closed |
+| `codex-app-server-web` | `tree_equal` | `match` | none |
+| `cifence` | `equal` | `match` | none |
+| `oaslananka.github.io` | `tree_equal` | `match` | none |
 
-Secret names are recorded only as names. No values are present in this report.
+## Dependabot Policy
 
+Dependabot is policy-managed by `_ops`.
+
+- `.github/dependabot.yml` is generated from policy and kept byte-identical on source and mirror.
+- Source-side security automation remains disabled by repository settings, so source files are inert.
+- Mirror-side security automation remains enabled by repository settings, so the same file is active in the CI/CD mirror.
+- Source-side Dependabot PRs are closed with an explanatory marker comment.
+- Mirror patch/minor PRs with clean checks are finalized through `_ops` `ops-pr-finalize.yml`.
+- Mirror major PRs are labeled `dependabot-major-review-required`.
+- Conflicting PRs are labeled `needs-human-conflict-resolution` and receive `@dependabot rebase`.
+
+Latest automation evidence:
+
+| Event | Evidence |
+|---|---|
+| Dependabot automation run | https://github.com/oaslananka-lab/_ops/actions/runs/25768974763 |
+| `a2a-mesh#34` TypeScript 6 fix-loop | https://github.com/oaslananka-lab/_ops/actions/runs/25767720900 |
+| `mcp-ssh-tool#74` fix-loop/finalize | https://github.com/oaslananka-lab/_ops/actions/runs/25768308383 and https://github.com/oaslananka-lab/_ops/actions/runs/25768447098 |
+| `mcp-ssh-tool#76` sync/finalize | https://github.com/oaslananka-lab/_ops/actions/runs/25769208774 and https://github.com/oaslananka-lab/_ops/actions/runs/25769308037 |
+
+## Publish And Deploy Notes
+
+This closeout did not reclassify registry ownership or secret availability. Current publish/deploy truth remains:
+
+- npm packages require npm trusted publishing configuration or protected `NPM_TOKEN` / `NODE_AUTH_TOKEN` where policy allows fallback.
+- MCP Registry publishing requires valid server metadata and registry setup.
+- `fovux`, `codex-app-server-web`, and `cifence` do not currently have a separate production package publish target detected.
+- `oaslananka.github.io` remains the GitHub Pages/deploy target.
+
+Secret values are never recorded here; only secret names are referenced.

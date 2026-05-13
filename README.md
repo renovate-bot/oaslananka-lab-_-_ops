@@ -97,7 +97,7 @@ oaslananka-lab/*    CI/CD mirror and release execution workspace
 oaslananka-lab/_ops control-plane
 ```
 
-The resumed pass eliminated internal `publish_workflow_not_found`, `production_environment_missing`, and known `Classification: unknown` rollout states. Remaining publish blockers are external registry or protected environment configuration states with exact run URLs and missing secret names in the rollout docs.
+The resumed pass eliminated internal publish-workflow discovery gaps, production-environment creation gaps, and known unknown-classification rollout states. Remaining publish blockers are external registry or protected environment configuration states with exact run URLs and missing secret names in the rollout docs.
 
 Policy lives under:
 
@@ -228,6 +228,28 @@ Comment commands routed through `inbox-handler.yml` include:
 ```
 
 Cloudflare DNS routes `webhook.oaslananka.dev` to the Render service. Both the direct Render health endpoint and the custom domain health endpoint have returned 200 OK in validation.
+
+## Fleet Maintenance Workflows
+
+Current policy-managed fleet maintenance runs from `_ops`:
+
+| Workflow | Purpose |
+|---|---|
+| `agent-fix-loop.yml` | Patch eligible PR failures, including TypeScript 6 `TS5101`; bot pushes use `HUSKY=0` and rollback is ancestry-safe. |
+| `repo-dependabot-auto.yml` | Process mirror Dependabot PRs; close source-side Dependabot PRs when source automation is disabled. |
+| `repo-fleet-parity-audit.yml` | Verify source/mirror tree relation and `.github/dependabot.yml` parity. |
+| `repo-fleet-security-state.yml` | Verify source disabled/mirror enabled security-setting split. |
+| `repo-fleet-health.yml` | Produce the fleet dashboard artifact and issue update. |
+| `repo-mirror-drift-check.yml` | Periodically detect source/mirror drift and dispatch sync where required. |
+
+Latest closeout evidence:
+
+```text
+Fleet parity audit:        https://github.com/oaslananka-lab/_ops/actions/runs/25769426735
+Fleet security-state audit:https://github.com/oaslananka-lab/_ops/actions/runs/25769431276
+Fleet health:              https://github.com/oaslananka-lab/_ops/actions/runs/25769435016
+Mirror drift check:        https://github.com/oaslananka-lab/_ops/actions/runs/25769438579
+```
 
 ## Current Pilot Scope
 
