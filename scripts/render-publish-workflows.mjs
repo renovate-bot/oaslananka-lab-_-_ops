@@ -38,6 +38,29 @@ function readTemplate(name, targetRepository) {
     .replaceAll("__TARGET_REPOSITORY__", targetRepository);
 }
 
+function pnpmOnlyWorkflow(content) {
+  return content
+    .replace(
+      /          if \[\[ -f pnpm-lock\.yaml \]\]; then\n            corepack enable\n            corepack install\n            corepack pnpm install --frozen-lockfile\n            corepack pnpm run build --if-present\n            corepack pnpm run prepublishOnly --if-present\n            corepack pnpm pack --pack-destination publish-artifact\n          else\n            if \[\[ -f package-lock\.json \|\| -f npm-shrinkwrap\.json \]\]; then npm ci; else npm install; fi\n            npm rebuild better-sqlite3 --if-present\n            npm run build --if-present\n            npm run prepublishOnly --if-present\n            npm pack --pack-destination publish-artifact\n          fi/g,
+      [
+        "          corepack enable",
+        "          corepack install",
+        "          corepack pnpm install --frozen-lockfile",
+        "          corepack pnpm run build --if-present",
+        "          corepack pnpm run prepublishOnly --if-present",
+        "          corepack pnpm pack --pack-destination publish-artifact",
+      ].join("\n"),
+    )
+    .replace(
+      /          if \[\[ -f pnpm-lock\.yaml \]\]; then\n            corepack enable\n            corepack install\n            corepack pnpm install --frozen-lockfile\n          else\n            if \[\[ -f package-lock\.json \|\| -f npm-shrinkwrap\.json \]\]; then npm ci; else npm install; fi\n          fi/g,
+      ["          corepack enable", "          corepack install", "          corepack pnpm install --frozen-lockfile"].join("\n"),
+    )
+    .replace(
+      /          if \[\[ -f pnpm-lock\.yaml \]\]; then corepack pnpm run build --if-present; else npm run build --if-present; fi/g,
+      "          corepack pnpm run build --if-present",
+    );
+}
+
 function writeIfChanged(file, content) {
   const normalized = content.endsWith("\n") ? content : `${content}\n`;
   if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === normalized) return false;
@@ -62,13 +85,13 @@ function standardizeMcpMetadata(targetDir, policy) {
   if (!fs.existsSync(serverJson)) return false;
   const metadata = JSON.parse(fs.readFileSync(serverJson, "utf8"));
   const pkg = packageMetadata(targetDir);
-  const mirrorOwner = policy.mirror?.mirror_owner;
-  const mirrorRepo = policy.mirror?.mirror_repo;
-  if (!mirrorOwner || !mirrorRepo) return false;
+  const sourceOwner = policy.mirror?.source_owner || policy.repository_role?.source_of_truth_owner;
+  const sourceRepo = policy.mirror?.source_repo || policy.mirror?.mirror_repo;
+  if (!sourceOwner || !sourceRepo) return false;
 
-  metadata.name = `io.github.${mirrorOwner}/${mirrorRepo}`;
+  metadata.name = `io.github.${sourceOwner}/${sourceRepo}`;
   metadata.repository = {
-    url: `https://github.com/${mirrorOwner}/${mirrorRepo}`,
+    url: `https://github.com/${sourceOwner}/${sourceRepo}`,
     source: "github",
   };
   if (pkg.version) metadata.version = pkg.version;
@@ -108,7 +131,10 @@ export function renderPublishWorkflows(args) {
 
   if (publishTemplate) {
     const file = path.join(workflowDir, publishTemplate === "deploy-pages.yml" ? "deploy-pages.yml" : "publish-production.yml");
-    if (writeIfChanged(file, readTemplate(publishTemplate, targetRepository))) {
+    const rendered = fs.existsSync(path.join(targetDir, "pnpm-lock.yaml"))
+      ? pnpmOnlyWorkflow(readTemplate(publishTemplate, targetRepository))
+      : readTemplate(publishTemplate, targetRepository);
+    if (writeIfChanged(file, rendered)) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
   }

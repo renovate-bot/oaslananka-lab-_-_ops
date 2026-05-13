@@ -12,6 +12,8 @@ test("Node publish templates use supported setup-node inputs and current trusted
     assert.doesNotMatch(text, /package-manager-cache/);
     assert.doesNotMatch(text, /corepack install \|\| true/);
     assert.doesNotMatch(text, /^NODE$/m);
+    assert.doesNotMatch(text, /\n  push:\n    tags:/);
+    assert.match(text, /cache: ""/);
     assert.match(text, /NODE_VERSION: "24\.15\.0"/);
   }
   assert.match(template("publish-production-npm.yml"), /NPM_VERSION: "11\.6\.2"/);

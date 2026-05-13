@@ -68,10 +68,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+          cache: ""
       - name: Install and verify package
         run: |
           set -euo pipefail
-          npm install -g "npm@${NPM_VERSION}"
           mkdir -p publish-artifact
           if [[ -f pnpm-lock.yaml ]]; then
             corepack enable
@@ -115,8 +115,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+          cache: ""
       - name: Use npm for trusted publishing
-        run: npm install -g "npm@${NPM_VERSION}"
+        run: npx --yes "npm@${NPM_VERSION}" --version
       - name: Publish to npm
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -177,14 +178,14 @@ jobs:
             write_report "failed" "workflow_failure" "NPM_PACKAGE_METADATA_INVALID"
             exit 1
           fi
-          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+          if npx --yes "npm@${NPM_VERSION}" view "${package_name}@${package_version}" version >/dev/null 2>&1; then
             echo "NPM_PACKAGE_VERSION_ALREADY_PUBLISHED"
             write_report "already_published" "idempotent_noop" ""
             exit 0
           fi
           publish_log="$(mktemp)"
           set +e
-          npm publish "${package_file}" --provenance --access public >"${publish_log}" 2>&1
+          npx --yes "npm@${NPM_VERSION}" publish "${package_file}" --provenance --access public >"${publish_log}" 2>&1
           status="$?"
           set -e
           if [[ "${status}" -ne 0 ]]; then

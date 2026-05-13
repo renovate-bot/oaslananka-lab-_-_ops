@@ -8,9 +8,6 @@ on:
         required: true
   release:
     types: [published]
-  push:
-    tags:
-      - "v*.*.*"
 
 permissions:
   contents: read

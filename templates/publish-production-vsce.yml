@@ -8,9 +8,6 @@ on:
         required: true
   release:
     types: [published]
-  push:
-    tags:
-      - "v*.*.*"
 
 permissions:
   contents: read
@@ -72,6 +69,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: ""
       - name: Install dependencies
         run: |
           set -euo pipefail
@@ -125,6 +123,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: ""
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package
@@ -200,6 +199,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: ""
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: vscode-extension-package
