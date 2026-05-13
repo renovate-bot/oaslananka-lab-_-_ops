@@ -108,20 +108,34 @@ function packageName(owner, repo) {
 function upsertIssue(report, markdown) {
   const date = new Date().toISOString().slice(0, 10);
   const title = `[fleet-health] ${date}`;
-  const issues = gh("oaslananka-lab", ["issue", "list", "--repo", "oaslananka-lab/_ops", "--state", "open", "--search", title, "--json", "number,title"], []);
-  const match = (issues || []).find((issue) => issue.title === title);
+  const opsToken = process.env.OPS_TOKEN || tokenFor("oaslananka-lab");
+  const existing = gh("oaslananka-lab", [
+    "issue", "list", "--repo", "oaslananka-lab/_ops",
+    "--state", "open", "--search", "fleet-health", "--limit", "20",
+    "--json", "number,title",
+  ], []);
+  const match = (existing || []).find((issue) => issue.title === title);
+  for (const issue of (existing || [])) {
+    if (issue.title !== title) {
+      spawnSync("gh", ["issue", "close", String(issue.number), "--repo", "oaslananka-lab/_ops"], {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: { ...process.env, GH_TOKEN: opsToken },
+      });
+    }
+  }
   if (match) {
     spawnSync("gh", ["issue", "edit", String(match.number), "--repo", "oaslananka-lab/_ops", "--body", markdown], {
       cwd: ROOT,
       encoding: "utf8",
-      env: { ...process.env, GH_TOKEN: process.env.OPS_TOKEN || tokenFor("oaslananka-lab") },
+      env: { ...process.env, GH_TOKEN: opsToken },
     });
     return match.number;
   }
   const created = spawnSync("gh", ["issue", "create", "--repo", "oaslananka-lab/_ops", "--title", title, "--body", markdown], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, GH_TOKEN: process.env.OPS_TOKEN || tokenFor("oaslananka-lab") },
+    env: { ...process.env, GH_TOKEN: opsToken },
   });
   const number = created.stdout.match(/\/issues\/(\d+)/)?.[1] || null;
   return number ? Number(number) : null;
