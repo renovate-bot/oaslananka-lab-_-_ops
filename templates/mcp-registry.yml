@@ -18,6 +18,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  MCP_PUBLISHER_VERSION: "1.7.9"
 
 concurrency:
   group: mcp-registry-publish-${{ github.ref }}
@@ -46,7 +47,7 @@ jobs:
           set -euo pipefail
           arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${os}_${arch}.tar.gz" | tar xz mcp-publisher
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_${os}_${arch}.tar.gz" | tar xz mcp-publisher
           sudo install -m 0755 mcp-publisher /usr/local/bin/mcp-publisher
       - name: Login via GitHub OIDC
         run: mcp-publisher login github-oidc
@@ -68,7 +69,7 @@ jobs:
           output="$(mcp-publisher publish 2>&1)"
           status="$?"
           set -e
-          printf '%s\n' "$output"
+          printf '%s\n' "${output}"
           if [[ "${status}" -eq 0 ]]; then
             node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-mcp-registry.json", JSON.stringify({channel:"mcp_registry",state:"published",result:"fresh_publish_success",blocker:"",package:"",version:"",run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:["mcp-publisher publish exited 0"]}, null, 2)+"\n")'
             exit 0

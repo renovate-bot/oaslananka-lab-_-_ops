@@ -80,7 +80,7 @@ jobs:
           mkdir -p publish-artifact
           if [[ -f pnpm-lock.yaml ]]; then
             corepack enable
-            corepack install || true
+            corepack install
             corepack pnpm install --frozen-lockfile
             corepack pnpm run build --if-present
             corepack pnpm run prepublishOnly --if-present
@@ -130,7 +130,29 @@ jobs:
           set -euo pipefail
           mkdir -p out
           write_report() {
-            REPORT_CHANNEL="npm" REPORT_STATE="$1" REPORT_RESULT="$2" REPORT_BLOCKER="$3" REPORT_PACKAGE="${package_name:-}" REPORT_VERSION="${package_version:-}" node -e 'const fs=require("fs"); fs.writeFileSync("out/publish-report-npm.json", JSON.stringify({channel:process.env.REPORT_CHANNEL,state:process.env.REPORT_STATE,result:process.env.REPORT_RESULT,blocker:process.env.REPORT_BLOCKER,package:process.env.REPORT_PACKAGE,version:process.env.REPORT_VERSION,run_url:process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID,evidence:[]}, null, 2)+"\n")'
+            local state="$1"
+            local result="$2"
+            local blocker="$3"
+            REPORT_CHANNEL="npm" \
+            REPORT_STATE="${state}" \
+            REPORT_RESULT="${result}" \
+            REPORT_BLOCKER="${blocker}" \
+            REPORT_PACKAGE="${package_name:-}" \
+            REPORT_VERSION="${package_version:-}" \
+            node <<'NODE'
+          const fs = require("fs");
+          const report = {
+            channel: process.env.REPORT_CHANNEL,
+            state: process.env.REPORT_STATE,
+            result: process.env.REPORT_RESULT,
+            blocker: process.env.REPORT_BLOCKER,
+            package: process.env.REPORT_PACKAGE,
+            version: process.env.REPORT_VERSION,
+            run_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            evidence: [],
+          };
+          fs.writeFileSync("out/publish-report-npm.json", `${JSON.stringify(report, null, 2)}\n`);
+NODE
           }
           token="${NPM_TOKEN:-${FALLBACK_NODE_AUTH_TOKEN:-}}"
           if [[ -n "${token}" ]]; then

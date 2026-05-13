@@ -10,6 +10,7 @@ test("Node publish templates use supported setup-node inputs and current trusted
   for (const name of ["publish-production-npm.yml", "publish-production-mcp.yml", "publish-production-vsce.yml"]) {
     const text = template(name);
     assert.doesNotMatch(text, /package-manager-cache/);
+    assert.doesNotMatch(text, /corepack install \|\| true/);
     assert.match(text, /NODE_VERSION: "24\.15\.0"/);
   }
   assert.match(template("publish-production-npm.yml"), /NPM_VERSION: "11\.6\.2"/);
@@ -27,10 +28,21 @@ test("npm and MCP publish templates support pnpm repositories before packing", (
 
 test("VSCE template packages once and publishes the VSIX artifact to both channels", () => {
   const text = template("publish-production-vsce.yml");
-  assert.match(text, /@vscode\/vsce package --no-dependencies/);
-  assert.match(text, /@vscode\/vsce publish --packagePath/);
-  assert.match(text, /ovsx publish "\$\{vsix\}"/);
+  assert.match(text, /VSCE_VERSION: "3\.9\.1"/);
+  assert.match(text, /OVSX_VERSION: "0\.10\.12"/);
+  assert.match(text, /@vscode\/vsce@\$\{VSCE_VERSION\}" package --no-dependencies/);
+  assert.match(text, /@vscode\/vsce@\$\{VSCE_VERSION\}" publish --packagePath/);
+  assert.match(text, /ovsx@\$\{OVSX_VERSION\}" publish "\$\{vsix\}"/);
   assert.doesNotMatch(text, /npm list/);
+});
+
+test("MCP registry templates pin mcp-publisher and do not download latest", () => {
+  for (const name of ["mcp-registry.yml", "publish-production-mcp.yml"]) {
+    const text = template(name);
+    assert.match(text, /MCP_PUBLISHER_VERSION: "1\.7\.9"/);
+    assert.match(text, /releases\/download\/v\$\{MCP_PUBLISHER_VERSION\}/);
+    assert.doesNotMatch(text, /releases\/latest\/download/);
+  }
 });
 
 test("PyPI template uses OIDC trusted publishing through the PyPA action", () => {
