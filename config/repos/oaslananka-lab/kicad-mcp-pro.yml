@@ -44,6 +44,7 @@ publish:
   enabled: true
   ghcr: true
   mcp_registry: true
+  mcp_metadata_self_managed: true
   require_environment: production
 
 dependabot:

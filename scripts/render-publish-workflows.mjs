@@ -177,7 +177,7 @@ export function renderPublishWorkflows(args) {
       changes.push(path.relative(targetDir, file).replaceAll(path.sep, "/"));
     }
   }
-  if (policy.publish?.mcp_registry && args.standardizeMcpMetadata && standardizeMcpMetadata(targetDir, policy)) {
+  if (policy.publish?.mcp_registry && args.standardizeMcpMetadata && !policy.publish?.mcp_metadata_self_managed && standardizeMcpMetadata(targetDir, policy)) {
     const mcpSubdir = policy.publish?.mcp_directory || "";
     changes.push(mcpSubdir ? `${mcpSubdir}/server.json` : "server.json");
   }
