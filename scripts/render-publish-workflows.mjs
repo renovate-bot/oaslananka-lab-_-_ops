@@ -9,7 +9,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function parseArgs(argv) {
   const args = {
-    policyOwner: "oaslananka-lab",
+    policyOwner: "oaslananka",
     targetDir: "",
     targetRepository: "",
     standardizeMcpMetadata: true,
